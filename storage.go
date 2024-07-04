@@ -137,7 +137,7 @@ func SearchBookmarks(query string) ([]Bookmark, error) {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		if !strings.Contains(scanner.Text(), fmt.Sprintf("%s", query)) {
+		if strings.Contains(scanner.Text(), fmt.Sprintf("%s", query)) {
 			values := strings.Split(string(scanner.Bytes()), ",")
 			b := Bookmark{
 				Value: values[0],
