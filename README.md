@@ -6,7 +6,7 @@ Book is backed by a CSV file, making it extremely easy to share bookmarks or man
 
 ```bash
 # Add a new bookmark "gh" pointing to github.com
-book -path=https://www.github.com gh
+book gh https://www.github.com
 
 # Open the "gh" bookmark
 book gh

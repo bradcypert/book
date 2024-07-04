@@ -82,7 +82,6 @@ func handleOpen(input Input) {
 }
 
 func parseFlags() (Input, error) {
-	path := flag.String("path", "", "The path at which the bookmark should point")
 	tags := flag.String("tags", "", "Comma Separated tags for faster searching")
 	search := flag.Bool("search", false, "Search for existing bookmarks against the provided query")
 	deleteAll := flag.Bool("deleteAll", false, "Ignore other flags and delete the bookmark database")
@@ -91,13 +90,14 @@ func parseFlags() (Input, error) {
 	flag.Parse()
 
 	bookmark := flag.Arg(0)
+	path := flag.Arg(1)
 
 	if bookmark == "" && !*deleteAll {
 		return Input{}, errors.New("a bookmark value is required. This value is the argument directly after the \"book\" command")
 	}
 
 	return Input{
-		Path:      *path,
+		Path:      path,
 		Tags:      t,
 		Bookmark:  bookmark,
 		DeleteAll: *deleteAll,
