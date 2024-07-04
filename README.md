@@ -30,4 +30,10 @@ There is no confirmation for this action.
 book -search github
 ```
 
+## Where are my bookmarks, though?
 
+Book leverages `os.UserConfigDir` to determine where to store your bookmarks. [More information on how UserConfigDir determines which directory here](https://pkg.go.dev/os#UserConfigDir)
+
+## Sharing Bookmarks
+
+If you use book to store common bookmarks, but want to share those bookmarks with someone else, you can share the bookmarks.csv file located in your UserConfigDir. The person receiving those bookmarks can add that file to their UserConfigDir, or pick and choose the bookmarks that they'd like to keep and simply add those to their bookmarks.csv
