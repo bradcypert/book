@@ -34,7 +34,7 @@ func main() {
 		handleDelete()
 	} else if input.Path != "" {
 		handleStore(input)
-	} else if input.Search == true {
+	} else if input.Search {
 		handleSearch(input)
 	} else {
 		handleOpen(input)
@@ -49,14 +49,22 @@ func handleDelete() {
 }
 
 func handleStore(input Input) {
-	err := StoreBookmark(input.Bookmark, input.Path, input.Tags)
+	file, err := getBookmarkFile(os.O_APPEND | os.O_WRONLY)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	err = StoreBookmark(file, input.Bookmark, input.Path, input.Tags)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 }
 
 func handleSearch(input Input) {
-	items, err := SearchBookmarks(input.Bookmark)
+	file, err := getBookmarkFile(os.O_RDONLY)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	items, err := SearchBookmarks(file, input.Bookmark)
 	if err != nil {
 		logger.Error(err.Error())
 	}
@@ -69,12 +77,16 @@ func handleSearch(input Input) {
 }
 
 func handleOpen(input Input) {
-	item, err := GetBookmark(input.Bookmark)
+	file, err := getBookmarkFile(os.O_RDONLY)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	item, err := GetBookmark(file, input.Bookmark)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
-	err = openBrowser(item.Path)
+	err = openExternal(item.Path)
 	if err != nil {
 		logger.Error(err.Error())
 	}
