@@ -31,7 +31,7 @@ func main() {
 	}
 
 	if input.DeleteAll {
-		handleDelete()
+		handleDeleteAll()
 	} else if input.Path != "" {
 		handleStore(input)
 	} else if input.Search {
@@ -41,7 +41,7 @@ func main() {
 	}
 }
 
-func handleDelete() {
+func handleDeleteAll() {
 	err := DeleteBookmarkFile()
 	if err != nil {
 		logger.Error(err.Error())
