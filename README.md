@@ -12,9 +12,16 @@ book gh https://www.github.com
 book gh
 ```
 
+## Listing all bookmarks
+```bash
+book --list
+```
+
 ## Deleting a bookmark by the bookmark key
 
-Coming soon.
+```bash
+book --delete gh
+```
 
 ## Deleting all bookmarks
 
