@@ -1,17 +1,18 @@
 const std = @import("std");
+const paths = @import("./paths.zig");
 
 const Error = error{
     ReadError,
     BookmarkNotFound,
 };
 
-const Bookmark = struct {
-    value: [] const u8,
-    path: [] const u8,
-    tags: [][] const u8,
+pub const Bookmark = struct {
+    value: []const u8,
+    path: []const u8,
+    tags: [][]const u8,
 
     pub fn fromLine(allocator: std.mem.Allocator, line: []u8) !Bookmark {
-        var splitter = std.mem.split(line, ',');
+        var splitter = std.mem.split(u8, line, ',');
         defer splitter.deinit();
 
         var parts = std.ArrayList([]const u8).init(allocator);
@@ -41,7 +42,6 @@ const Bookmark = struct {
     }
 };
 
-
 fn nextLine(reader: std.io.Reader, buffer: []u8) !?[]const u8 {
     const line = (try reader.readUntilDelimiterOrEof(
         buffer,
@@ -55,20 +55,29 @@ fn nextLine(reader: std.io.Reader, buffer: []u8) !?[]const u8 {
     }
 }
 
-fn storeBookmark(allocator: std.mem.Allocator, writer: std.io.Writer, bookmark: Bookmark) !void {
+pub fn storeBookmark(allocator: std.mem.Allocator, writer: anytype, bookmark: Bookmark) !void {
     // Join tags array into a comma-separated string
-    const tags_str = std.mem.join(allocator, bookmark.tags, ",") catch {
-        return error.OutOfMemory;
-    };
-    defer allocator.free(tags_str);
-    try writer.print("{s},{s},{any}\n", .{ bookmark.value, bookmark.path, tags_str, });
+    var tags = std.ArrayList(u8).init(allocator);
+    defer tags.deinit();
+
+    for (bookmark.tags) |tag| {
+        try tags.appendSlice(tag);
+        try tags.appendSlice(",");
+    }
+    const tagSlice = try tags.toOwnedSlice();
+    defer allocator.free(tagSlice);
+    try writer.print("{s},{s},{any}\n", .{
+        bookmark.value,
+        bookmark.path,
+        tagSlice,
+    });
 }
 
-pub fn deleteBookmark(allocator: *std.mem.Allocator, reader: anytype, bookmark: []const u8) !void {
+pub fn deleteBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: []const u8) !void {
     var buf = std.ArrayList(u8).init(allocator);
     defer buf.deinit();
 
-    var input = std.io.bufferedReader(reader);
+    var input = std.io.bufferedReader(reader).reader();
 
     while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n')) |line| {
         if (!std.mem.startsWith(u8, line, bookmark) or (line[bookmark.len] != ',')) {
@@ -77,7 +86,8 @@ pub fn deleteBookmark(allocator: *std.mem.Allocator, reader: anytype, bookmark: 
         }
     }
 
-    const fp = try getBookmarkFilePath();
+    const fp = try paths.getBookmarkFilePath(allocator);
+    defer allocator.free(fp);
 
     var file = try std.fs.Dir.cwd().createFile(fp, .{});
     defer file.close();
@@ -85,11 +95,11 @@ pub fn deleteBookmark(allocator: *std.mem.Allocator, reader: anytype, bookmark: 
     try file.writeAll(buf.items);
 }
 
-pub fn searchBookmarks(allocator: *std.mem.Allocator, reader: anytype, query: []const u8) ![]Bookmark {
+pub fn searchBookmarks(allocator: std.mem.Allocator, reader: anytype, query: []const u8) ![]Bookmark {
     var searchResults = std.ArrayList(Bookmark).init(allocator);
     defer searchResults.deinit();
 
-    var input = std.io.bufferedReader(reader);
+    var input = std.io.bufferedReader(reader).reader();
 
     while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n')) |line| {
         if (std.mem.contains(u8, line, query)) {
@@ -105,9 +115,8 @@ pub fn searchBookmarks(allocator: *std.mem.Allocator, reader: anytype, query: []
     return searchResults.toOwnedSlice();
 }
 
-
-pub fn getBookmark(allocator: *std.mem.Allocator, reader: anytype, bookmark: []const u8) !Bookmark {
-    var input = std.io.bufferedReader(reader);
+pub fn getBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: []const u8) !Bookmark {
+    var input = std.io.bufferedReader(reader).reader();
 
     while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n')) |line| {
         if (std.mem.startsWith(u8, line, bookmark)) {

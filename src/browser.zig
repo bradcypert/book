@@ -2,7 +2,7 @@ const std = @import("std");
 
 const urlRegex = std.regex.compile("https?://") catch unreachable;
 
-fn openExternal(path: []const u8) !void {
+pub fn openExternal(path: []const u8) !void {
     var err: ?std.os.Error = null;
 
     const os = std.builtin.os.tag;

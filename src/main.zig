@@ -1,24 +1,87 @@
 const std = @import("std");
 const clap = @import("clap");
 const bookmarkPaths = @import("./paths.zig");
+const storage = @import("./storage.zig");
+const browser = @import("./browser.zig");
 
 fn handleDeleteAll(allocator: std.mem.Allocator, skipConfirmation: bool) !void {
     if (!skipConfirmation) {
-        // write to std out asking if they really want to do this
+        const stdout = std.io.getStdOut().writer();
+        try stdout.print("Are you sure you want to delete all bookmarks? (y/n): ", .{});
+        var input: [1]u8 = undefined;
+        const stdin = std.io.getStdIn().reader();
+        _ = stdin.readUntilDelimiter(&input, '\n') catch return;
+
+        if (!std.mem.eql(u8, &input, "y") and !std.mem.eql(u8, &input, "Y")) {
+            return;
+        }
     }
 
     return bookmarkPaths.deleteBookmarkFile(allocator);
 }
 
-fn handleDelete(bookmarkKey: []const u8, skipConfirmation: bool) !void {}
+fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfirmation: bool) !void {
+    if (!skipConfirmation) {
+        const stdout = std.io.getStdOut().writer();
+        try stdout.print("Are you sure you want to delete the bookmark '{s}'? (y/n): ", .{bookmarkKey});
+        var input: [1]u8 = undefined;
+        const stdin = std.io.getStdIn().reader();
+        _ = try stdin.readUntilDelimiter(&input, '\n');
 
-fn handleOpen(bookmarkKey: []const u8) !void {}
+        if (!std.mem.eql(u8, &input, "y") and !std.mem.eql(u8, &input, "Y")) {
+            return;
+        }
+    }
 
-fn handleStore(bookmarkKey: []const u8, bookmarkValue: []const u8) !void {}
+    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_write });
+    try storage.deleteBookmark(allocator, file.reader(), bookmarkKey);
+}
 
-fn handleList() !void {}
+fn handleOpen(allocator: std.mem.Allocator, bookmarkKey: []const u8) !void {
+    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
+    const bookmark = try storage.getBookmark(allocator, file.reader(), bookmarkKey);
+    browser.openExternal(bookmark.path);
+}
 
-fn handleSearch(searchQuery: []const u8) !void {}
+fn handleStore(allocator: std.mem.Allocator, bookmarkKey: []const u8, bookmarkValue: []const u8, bookmarkTags: [][]const u8) !void {
+    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_write });
+
+    try storage.storeBookmark(allocator, file.writer(), storage.Bookmark{
+        .value = bookmarkKey,
+        .path = bookmarkValue,
+        .tags = bookmarkTags,
+    });
+}
+
+fn handleList(allocator: std.mem.Allocator, writer: anytype) !void {
+    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
+    const bookmarks = try storage.searchBookmarks(allocator, file.reader(), "");
+    for (bookmarks.items) |item| {
+        const tags_str = std.mem.join(allocator, item.tags, ",") catch {
+            return error.OutOfMemory;
+        };
+        try writer.print("{s},{s},{any}\n", .{
+            item.value,
+            item.path,
+            tags_str,
+        });
+    }
+}
+
+fn handleSearch(allocator: std.mem.Allocator, writer: anytype, searchQuery: []const u8) !void {
+    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
+    const bookmarks = try storage.searchBookmarks(allocator, file.reader(), searchQuery);
+    for (bookmarks.items) |item| {
+        const tags_str = std.mem.join(allocator, item.tags, ",") catch {
+            return error.OutOfMemory;
+        };
+        try writer.print("{s},{s},{any}\n", .{
+            item.value,
+            item.path,
+            tags_str,
+        });
+    }
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -30,11 +93,13 @@ pub fn main() !void {
         \\-h, --help             Display this help and exit.
         \\-s, --search <str>     Search for existing bookmarks against the provided query
         \\-t, --tags   <str>     Comma separated tags for faster searching
-        \\-d, --delete <str>     Delete the bookmark with the provided key
+        \\-d, --delete           Delete the bookmark with the provided key
         \\-l, --list             List all bookmarks
         \\-D, --deleteAll        Ignore other flags and delete bookmark database
         \\-Y, --yes              Accept all future confirmations with "yes"
-        \\<str>...
+        \\<str>                  Bookmark key
+        \\<str>                  Bookmark value
+        \\<str>                  Bookmark tags (separated by comma)
     );
 
     var diag = clap.Diagnostic{};
@@ -49,27 +114,40 @@ pub fn main() !void {
     defer res.deinit();
 
     if (res.args.deleteAll != 0) {
-        return handleDeleteAll(res.args.yes);
+        return handleDeleteAll(allocator, res.args.yes == 0);
     }
 
     if (res.args.list != 0) {
-        return handleList();
+        return handleList(allocator, std.io.getStdOut().writer());
     }
 
-    if (res.args.delete != 0 and res.positionals[0]) |bookmarkKey| {
-        return handleDelete(bookmarkKey);
+    if (res.args.delete != 0) {
+        if (res.positionals[0].len != 0) {
+            const bookmarkKey = res.positionals[0];
+            return handleDelete(allocator, bookmarkKey, res.args.yes == 0);
+        }
     }
 
-    if (res.positionals[0]) |bookmarkKey| {
-        if (res.positionals[1]) |bookmarkValue| {
-            return handleStore(bookmarkKey, bookmarkValue);
+    if (res.positionals[0].len != 0) {
+        const bookmarkKey = res.positionals[0];
+        if (res.positionals[1].len != 0) {
+            const bookmarkValue = res.positionals[1];
+            const bookmarkTags = res.positionals[2];
+            var tagIterator = std.mem.split(u8, bookmarkTags, ",");
+
+            var list = std.ArrayList([]const u8).init(allocator);
+            defer list.deinit();
+            while (tagIterator.next()) |tag| try list.append(tag);
+            const tags = try list.toOwnedSlice();
+
+            return handleStore(allocator, bookmarkKey, bookmarkValue, tags);
         } else {
-            return handleOpen(bookmarkKey);
+            return handleOpen(allocator, bookmarkKey);
         }
     }
 
     if (res.args.search) |query| {
-        return handleSearch(query);
+        return handleSearch(allocator, std.io.getStdOut().writer(), query);
     }
 
     if (res.args.help != 0) {
