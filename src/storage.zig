@@ -9,29 +9,28 @@ const Error = error{
 pub const Bookmark = struct {
     value: []const u8,
     path: []const u8,
-    tags: [][]const u8,
+    tags: []const []const u8,
 
     pub fn fromLine(allocator: std.mem.Allocator, line: []u8) !Bookmark {
-        var splitter = std.mem.split(u8, line, ',');
-        defer splitter.deinit();
+        var splitter = std.mem.split(u8, line, ",");
 
         var parts = std.ArrayList([]const u8).init(allocator);
         defer parts.deinit();
 
         while (splitter.next()) |part| {
-            try parts.append(part);
+            try parts.append(try allocator.dupe(u8, part));
         }
 
         if (parts.items.len < 2) {
             return error.InvalidInput;
         }
 
-        const value = parts.items[0];
-        const path = parts.items[1];
+        const value = try allocator.dupe(u8, parts.items[0]);
+        const path = try allocator.dupe(u8, parts.items[1]);
 
         var tags = try allocator.alloc([]const u8, parts.items.len - 2);
-        for (parts.items[2..], 2..) |tag, index| {
-            tags[index] = tag;
+        for (parts.items[2..], 0..) |tag, index| {
+            tags[index] = try allocator.dupe(u8, tag);
         }
 
         return Bookmark{
@@ -39,6 +38,15 @@ pub const Bookmark = struct {
             .path = path,
             .tags = tags,
         };
+    }
+
+    pub fn free(self: Bookmark, allocator: std.mem.Allocator) void {
+        for (self.tags) |tag| {
+            allocator.free(tag);
+        }
+        allocator.free(self.tags);
+        allocator.free(self.path);
+        allocator.free(self.value);
     }
 };
 
@@ -77,9 +85,10 @@ pub fn deleteBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: [
     var buf = std.ArrayList(u8).init(allocator);
     defer buf.deinit();
 
-    var input = std.io.bufferedReader(reader).reader();
+    var buffIo = std.io.bufferedReader(reader);
+    var input = buffIo.reader();
 
-    while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n')) |line| {
+    while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096)) |line| {
         if (!std.mem.startsWith(u8, line, bookmark) or (line[bookmark.len] != ',')) {
             try buf.appendSlice(line);
             try buf.appendSlice("\n");
@@ -89,7 +98,7 @@ pub fn deleteBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: [
     const fp = try paths.getBookmarkFilePath(allocator);
     defer allocator.free(fp);
 
-    var file = try std.fs.Dir.cwd().createFile(fp, .{});
+    var file = try std.fs.cwd().createFile(fp, .{});
     defer file.close();
 
     try file.writeAll(buf.items);
@@ -99,33 +108,28 @@ pub fn searchBookmarks(allocator: std.mem.Allocator, reader: anytype, query: []c
     var searchResults = std.ArrayList(Bookmark).init(allocator);
     defer searchResults.deinit();
 
-    var input = std.io.bufferedReader(reader).reader();
+    var buffIo = std.io.bufferedReader(reader);
+    var input = buffIo.reader();
 
-    while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n')) |line| {
-        if (std.mem.contains(u8, line, query)) {
+    while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096)) |line| {
+        if (std.mem.indexOf(u8, line, query)) |_| {
             const bookmark = try Bookmark.fromLine(allocator, line);
             try searchResults.append(bookmark);
         }
-    }
-
-    if (input.hasError()) {
-        return error.SearchError;
     }
 
     return searchResults.toOwnedSlice();
 }
 
 pub fn getBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: []const u8) !Bookmark {
-    var input = std.io.bufferedReader(reader).reader();
+    var buffIo = std.io.bufferedReader(reader);
+    var input = buffIo.reader();
 
-    while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n')) |line| {
+    while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096)) |line| {
+        std.debug.print("{s} :::: {s}", .{ line, bookmark });
         if (std.mem.startsWith(u8, line, bookmark)) {
             return Bookmark.fromLine(allocator, line);
         }
-    }
-
-    if (input.hasError()) {
-        return Error.ReadError;
     }
 
     return Error.BookmarkNotFound;

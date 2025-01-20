@@ -27,7 +27,10 @@ pub fn getBookmarkFile(allocator: std.mem.Allocator, file_mode: std.fs.File.Open
     const storage_path = try getStoragePath(allocator);
     defer allocator.free(storage_path);
 
-    try std.fs.makeDirAbsolute(storage_path);
+    std.fs.makeDirAbsolute(storage_path) catch |err| switch (err) {
+        std.posix.MakeDirError.PathAlreadyExists => {},
+        else => return err,
+    };
 
     return std.fs.cwd().openFile(bookmark_file_path, file_mode) catch std.fs.cwd().createFile(bookmark_file_path, .{ .read = true });
 }

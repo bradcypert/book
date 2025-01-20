@@ -33,14 +33,15 @@ fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfi
         }
     }
 
-    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_write });
+    var file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_write });
     try storage.deleteBookmark(allocator, file.reader(), bookmarkKey);
 }
 
 fn handleOpen(allocator: std.mem.Allocator, bookmarkKey: []const u8) !void {
     const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
     const bookmark = try storage.getBookmark(allocator, file.reader(), bookmarkKey);
-    browser.openExternal(bookmark.path);
+    defer bookmark.free(allocator);
+    try browser.openExternal(allocator, bookmark.path);
 }
 
 fn handleStore(allocator: std.mem.Allocator, bookmarkKey: []const u8, bookmarkValue: []const u8, bookmarkTags: [][]const u8) !void {
@@ -53,34 +54,41 @@ fn handleStore(allocator: std.mem.Allocator, bookmarkKey: []const u8, bookmarkVa
     });
 }
 
-fn handleList(allocator: std.mem.Allocator, writer: anytype) !void {
-    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
-    const bookmarks = try storage.searchBookmarks(allocator, file.reader(), "");
-    for (bookmarks.items) |item| {
-        const tags_str = std.mem.join(allocator, item.tags, ",") catch {
-            return error.OutOfMemory;
-        };
-        try writer.print("{s},{s},{any}\n", .{
-            item.value,
-            item.path,
+fn printBookmarks(allocator: std.mem.Allocator, bookmarks: []storage.Bookmark, writer: anytype) !void {
+    for (bookmarks) |bookmark| {
+        const tags_str = try std.mem.join(allocator, ",", bookmark.tags);
+        std.debug.print("{s}", .{tags_str});
+        defer allocator.free(tags_str);
+        try writer.print(">> {s}, {s}, {s}\n", .{
+            bookmark.value,
+            bookmark.path,
             tags_str,
         });
     }
 }
 
+fn handleList(allocator: std.mem.Allocator, writer: anytype) !void {
+    const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
+    const bookmarks = try storage.searchBookmarks(allocator, file.reader(), "");
+    defer {
+        for (bookmarks) |bookmark| {
+            bookmark.free(allocator);
+        }
+        allocator.free(bookmarks);
+    }
+    try printBookmarks(allocator, bookmarks, writer);
+}
+
 fn handleSearch(allocator: std.mem.Allocator, writer: anytype, searchQuery: []const u8) !void {
     const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
     const bookmarks = try storage.searchBookmarks(allocator, file.reader(), searchQuery);
-    for (bookmarks.items) |item| {
-        const tags_str = std.mem.join(allocator, item.tags, ",") catch {
-            return error.OutOfMemory;
-        };
-        try writer.print("{s},{s},{any}\n", .{
-            item.value,
-            item.path,
-            tags_str,
-        });
+    defer {
+        for (bookmarks) |bookmark| {
+            bookmark.free(allocator);
+        }
+        allocator.free(bookmarks);
     }
+    try printBookmarks(allocator, bookmarks, writer);
 }
 
 pub fn main() !void {
@@ -128,17 +136,21 @@ pub fn main() !void {
         }
     }
 
-    if (res.positionals[0].len != 0) {
+    if (res.positionals.len > 0 and res.positionals[0].len != 0) {
         const bookmarkKey = res.positionals[0];
-        if (res.positionals[1].len != 0) {
+        if (res.positionals.len > 1 and res.positionals[1].len != 0) {
             const bookmarkValue = res.positionals[1];
-            const bookmarkTags = res.positionals[2];
+            const bookmarkTags = if (res.positionals.len > 2) res.positionals[2] else &[_]u8{};
             var tagIterator = std.mem.split(u8, bookmarkTags, ",");
 
             var list = std.ArrayList([]const u8).init(allocator);
             defer list.deinit();
-            while (tagIterator.next()) |tag| try list.append(tag);
+            while (tagIterator.next()) |tag| try list.append(try allocator.dupe(u8, tag));
             const tags = try list.toOwnedSlice();
+
+            for (tags) |tag| {
+                defer allocator.free(tag);
+            }
 
             return handleStore(allocator, bookmarkKey, bookmarkValue, tags);
         } else {
