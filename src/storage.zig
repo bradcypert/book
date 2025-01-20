@@ -90,6 +90,7 @@ pub fn deleteBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: [
     var input = buffIo.reader();
 
     while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096)) |line| {
+        defer allocator.free(line);
         if (!std.mem.startsWith(u8, line, bookmark) or (line[bookmark.len] != ',')) {
             try buf.appendSlice(line);
             try buf.appendSlice("\n");
