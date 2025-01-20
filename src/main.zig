@@ -93,7 +93,7 @@ fn handleSearch(allocator: std.mem.Allocator, writer: anytype, searchQuery: []co
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 50 }){};
     defer _ = gpa.deinit();
 
     const allocator = gpa.allocator();

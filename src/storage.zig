@@ -20,6 +20,11 @@ pub const Bookmark = struct {
         while (splitter.next()) |part| {
             try parts.append(try allocator.dupe(u8, part));
         }
+        defer {
+            for (parts.items) |part| {
+                allocator.free(part);
+            }
+        }
 
         const value = try allocator.dupe(u8, parts.items[0]);
         const path = try allocator.dupe(u8, parts.items[1]);
@@ -27,10 +32,6 @@ pub const Bookmark = struct {
         var tags = try allocator.alloc([]const u8, parts.items.len - 2);
         for (parts.items[2..], 0..) |tag, index| {
             tags[index] = try allocator.dupe(u8, tag);
-        }
-
-        for (parts.items) |part| {
-            allocator.free(part);
         }
 
         return Bookmark{
@@ -127,12 +128,10 @@ pub fn getBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: []co
     var input = buffIo.reader();
 
     while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096)) |line| {
-        std.debug.print("{s} :::: {s}", .{ line, bookmark });
+        defer allocator.free(line);
         if (std.mem.startsWith(u8, line, bookmark)) {
             return Bookmark.fromLine(allocator, line);
         }
-
-        allocator.free(line);
     }
 
     return Error.BookmarkNotFound;
