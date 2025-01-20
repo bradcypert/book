@@ -39,8 +39,10 @@ fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfi
 
 fn handleOpen(allocator: std.mem.Allocator, bookmarkKey: []const u8) !void {
     const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
+    // LEAKING HERE-ISH
     const bookmark = try storage.getBookmark(allocator, file.reader(), bookmarkKey);
     defer bookmark.free(allocator);
+    // END LEAK HERE
     try browser.openExternal(allocator, bookmark.path);
 }
 
@@ -57,7 +59,6 @@ fn handleStore(allocator: std.mem.Allocator, bookmarkKey: []const u8, bookmarkVa
 fn printBookmarks(allocator: std.mem.Allocator, bookmarks: []storage.Bookmark, writer: anytype) !void {
     for (bookmarks) |bookmark| {
         const tags_str = try std.mem.join(allocator, ",", bookmark.tags);
-        std.debug.print("{s}", .{tags_str});
         defer allocator.free(tags_str);
         try writer.print(">> {s}, {s}, {s}\n", .{
             bookmark.value,

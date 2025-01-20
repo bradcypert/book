@@ -21,16 +21,16 @@ pub const Bookmark = struct {
             try parts.append(try allocator.dupe(u8, part));
         }
 
-        if (parts.items.len < 2) {
-            return error.InvalidInput;
-        }
-
         const value = try allocator.dupe(u8, parts.items[0]);
         const path = try allocator.dupe(u8, parts.items[1]);
 
         var tags = try allocator.alloc([]const u8, parts.items.len - 2);
         for (parts.items[2..], 0..) |tag, index| {
             tags[index] = try allocator.dupe(u8, tag);
+        }
+
+        for (parts.items) |part| {
+            allocator.free(part);
         }
 
         return Bookmark{
@@ -115,6 +115,7 @@ pub fn searchBookmarks(allocator: std.mem.Allocator, reader: anytype, query: []c
         if (std.mem.indexOf(u8, line, query)) |_| {
             const bookmark = try Bookmark.fromLine(allocator, line);
             try searchResults.append(bookmark);
+            allocator.free(line);
         }
     }
 
@@ -130,6 +131,8 @@ pub fn getBookmark(allocator: std.mem.Allocator, reader: anytype, bookmark: []co
         if (std.mem.startsWith(u8, line, bookmark)) {
             return Bookmark.fromLine(allocator, line);
         }
+
+        allocator.free(line);
     }
 
     return Error.BookmarkNotFound;
