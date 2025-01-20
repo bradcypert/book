@@ -28,7 +28,7 @@ fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfi
         const stdin = std.io.getStdIn().reader();
         _ = try stdin.readUntilDelimiter(&input, '\n');
 
-        if (!std.mem.eql(u8, &input, "y") and !std.mem.eql(u8, &input, "Y")) {
+        if (!std.mem.eql(u8, &input, "y") or !std.mem.eql(u8, &input, "Y")) {
             return;
         }
     }
@@ -146,12 +146,9 @@ pub fn main() !void {
 
             var list = std.ArrayList([]const u8).init(allocator);
             defer list.deinit();
-            while (tagIterator.next()) |tag| try list.append(try allocator.dupe(u8, tag));
+            while (tagIterator.next()) |tag| try list.append(tag);
             const tags = try list.toOwnedSlice();
-
-            for (tags) |tag| {
-                defer allocator.free(tag);
-            }
+            defer allocator.free(tags);
 
             return handleStore(allocator, bookmarkKey, bookmarkValue, tags);
         } else {

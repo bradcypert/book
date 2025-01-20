@@ -113,10 +113,11 @@ pub fn searchBookmarks(allocator: std.mem.Allocator, reader: anytype, query: []c
     var input = buffIo.reader();
 
     while (try input.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096)) |line| {
+        defer allocator.free(line);
+
         if (std.mem.indexOf(u8, line, query)) |_| {
             const bookmark = try Bookmark.fromLine(allocator, line);
             try searchResults.append(bookmark);
-            allocator.free(line);
         }
     }
 
