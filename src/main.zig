@@ -8,11 +8,10 @@ fn handleDeleteAll(allocator: std.mem.Allocator, skipConfirmation: bool) !void {
     if (!skipConfirmation) {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("Are you sure you want to delete all bookmarks? (y/n): ", .{});
-        var input: [1]u8 = undefined;
+        var input: [2]u8 = undefined;
         const stdin = std.io.getStdIn().reader();
-        _ = stdin.readUntilDelimiter(&input, '\n') catch return;
-
-        if (!std.mem.eql(u8, &input, "y") and !std.mem.eql(u8, &input, "Y")) {
+        const in = stdin.readUntilDelimiter(&input, '\n') catch return;
+        if (!std.mem.eql(u8, in, "y") or !std.mem.eql(u8, in, "Y")) {
             return;
         }
     }
@@ -24,11 +23,11 @@ fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfi
     if (!skipConfirmation) {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("Are you sure you want to delete the bookmark '{s}'? (y/n): ", .{bookmarkKey});
-        var input: [1]u8 = undefined;
+        var input: [2]u8 = undefined;
         const stdin = std.io.getStdIn().reader();
-        _ = try stdin.readUntilDelimiter(&input, '\n');
+        const in = try stdin.readUntilDelimiter(&input, '\n');
 
-        if (!std.mem.eql(u8, &input, "y") or !std.mem.eql(u8, &input, "Y")) {
+        if (!std.mem.eql(u8, in, "y") or !std.mem.eql(u8, in, "Y")) {
             return;
         }
     }
@@ -58,7 +57,7 @@ fn handleStore(allocator: std.mem.Allocator, bookmarkKey: []const u8, bookmarkVa
 
 fn printBookmarks(allocator: std.mem.Allocator, bookmarks: []storage.Bookmark, writer: anytype) !void {
     for (bookmarks) |bookmark| {
-        const tags_str = try std.mem.join(allocator, ",", bookmark.tags);
+        const tags_str: []const u8 = try std.mem.join(allocator, ",", bookmark.tags);
         defer allocator.free(tags_str);
         try writer.print(">> {s}, {s}, {s}\n", .{
             bookmark.value,
@@ -123,7 +122,7 @@ pub fn main() !void {
     defer res.deinit();
 
     if (res.args.deleteAll != 0) {
-        return handleDeleteAll(allocator, res.args.yes == 0);
+        return handleDeleteAll(allocator, res.args.yes != 0);
     }
 
     if (res.args.list != 0) {
@@ -133,7 +132,7 @@ pub fn main() !void {
     if (res.args.delete != 0) {
         if (res.positionals[0].len != 0) {
             const bookmarkKey = res.positionals[0];
-            return handleDelete(allocator, bookmarkKey, res.args.yes == 0);
+            return handleDelete(allocator, bookmarkKey, res.args.yes != 0);
         }
     }
 
