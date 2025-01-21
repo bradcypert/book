@@ -16,7 +16,6 @@ pub fn getBookmarkFilePath(allocator: std.mem.Allocator) ![]const u8 {
 pub fn deleteBookmarkFile(allocator: std.mem.Allocator) !void {
     const bookmark_file_path = try getBookmarkFilePath(allocator);
     defer allocator.free(bookmark_file_path);
-
     try std.fs.deleteFileAbsolute(bookmark_file_path);
 }
 

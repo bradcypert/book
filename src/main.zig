@@ -11,7 +11,7 @@ fn handleDeleteAll(allocator: std.mem.Allocator, skipConfirmation: bool) !void {
         var input: [2]u8 = undefined;
         const stdin = std.io.getStdIn().reader();
         const in = stdin.readUntilDelimiter(&input, '\n') catch return;
-        if (!std.mem.eql(u8, in, "y") or !std.mem.eql(u8, in, "Y")) {
+        if (!std.mem.eql(u8, in, "y") and !std.mem.eql(u8, in, "Y")) {
             return;
         }
     }
@@ -27,7 +27,7 @@ fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfi
         const stdin = std.io.getStdIn().reader();
         const in = try stdin.readUntilDelimiter(&input, '\n');
 
-        if (!std.mem.eql(u8, in, "y") or !std.mem.eql(u8, in, "Y")) {
+        if (!std.mem.eql(u8, in, "y") and !std.mem.eql(u8, in, "Y")) {
             return;
         }
     }
@@ -38,10 +38,8 @@ fn handleDelete(allocator: std.mem.Allocator, bookmarkKey: []const u8, skipConfi
 
 fn handleOpen(allocator: std.mem.Allocator, bookmarkKey: []const u8) !void {
     const file = try bookmarkPaths.getBookmarkFile(allocator, .{ .mode = .read_only });
-    // LEAKING HERE-ISH
     const bookmark = try storage.getBookmark(allocator, file.reader(), bookmarkKey);
     defer bookmark.free(allocator);
-    // END LEAK HERE
     try browser.openExternal(allocator, bookmark.path);
 }
 

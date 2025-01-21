@@ -9,7 +9,7 @@ const Error = error{
 pub const Bookmark = struct {
     value: []const u8,
     path: []const u8,
-    tags: []const []const u8,
+    tags: [][]const u8,
 
     pub fn fromLine(allocator: std.mem.Allocator, line: []u8) !Bookmark {
         var splitter = std.mem.split(u8, line, ",");
