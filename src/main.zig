@@ -13,3 +13,7 @@ pub fn main() !void {
 
     try stdout.flush();
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

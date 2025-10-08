@@ -27,16 +27,31 @@ pub const Bookmark = struct {
         reader.streamRemaining(writer);
     }
 
-    pub fn lookup(reader: std.Io.Reader, value: []const u8) !Bookmark {
-        while (reader.peekByte()) {
-            const line = reader.takeDelimiter();
-            var i = std.mem.splitScalar(u8, line, ",");
-            if (std.mem.eql(u8, i.first(), value)) {
+    pub fn lookup(reader: *std.Io.Reader, value: []const u8, allocator: std.mem.Allocator) !Bookmark {
+        while (true) {
+            const line = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
+                error.EndOfStream => return error.NotFound,
+                else => |e| return e,
+            };
+
+            var iter = std.mem.splitScalar(u8, line, ',');
+            const first = iter.first();
+            if (std.mem.eql(u8, first, value)) {
+                const path = iter.next() orelse return error.InvalidFormat;
+
+                // Collect remaining fields as tags
+                var tags: std.ArrayList([]const u8) = .empty;
+                defer tags.deinit(allocator);
+                while (iter.next()) |tag| {
+                    if (tag.len > 0) { // Skip empty strings
+                        try tags.append(allocator, tag);
+                    }
+                }
+
                 return .{
-                    .value = i.first(),
-                    .path = i.next(),
-                    .tags = &.{},
-                    // TODO Tags?
+                    .value = first,
+                    .path = path,
+                    .tags = try tags.toOwnedSlice(allocator),
                 };
             }
         }
@@ -46,11 +61,23 @@ pub const Bookmark = struct {
 test "storeBookmark" {
     var bookmark = Bookmark.init("gh", "https://www.github.com");
     bookmark.tags = &.{ "dev", "code", "test123" };
-    const buffer: [1024]u8 = undefined;
-    var writer = std.Io.Reader.fixed(buffer);
-    const w = &writer.interface;
-    try bookmark.storeBookmark(w);
+    var buffer: [1024]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try bookmark.storeBookmark(&writer);
 
     try writer.flush();
-    try testing.expectEqualStrings("", writer.buffered());
+    try testing.expectEqualStrings("gh,https://www.github.com,dev,code,test123,\n", writer.buffered());
+}
+
+test "lookupBookmark" {
+    // lookup a bookmark from a reader
+    const data = "gh,https://www.github.com,dev,code,test123,\n";
+    var reader = std.Io.Reader.fixed(data);
+    const bookmark = try Bookmark.lookup(&reader, "gh", testing.allocator);
+    defer testing.allocator.free(bookmark.tags);
+    try testing.expectEqualStrings("gh", bookmark.value);
+    try testing.expectEqualStrings("https://www.github.com", bookmark.path);
+    try testing.expectEqualStrings("dev", bookmark.tags[0]);
+    try testing.expectEqualStrings("code", bookmark.tags[1]);
+    try testing.expectEqualStrings("test123", bookmark.tags[2]);
 }
