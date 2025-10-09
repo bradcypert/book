@@ -134,11 +134,10 @@ fn handleList(allocator: std.mem.Allocator) !void {
     const file = try paths.getBookmarkFile(allocator, .read_only);
     defer file.close();
 
-    const file_contents = try file.readToEndAlloc(allocator, 1024 * 1024);
-    defer allocator.free(file_contents);
+    var buffer: [1024]u8 = undefined;
+    var reader = file.reader(&buffer);
 
-    var reader = std.Io.Reader.fixed(file_contents);
-    const results = try Bookmark.search(allocator, &reader, "");
+    const results = try Bookmark.search(allocator, &reader.interface, "");
     defer {
         for (results) |bookmark| {
             allocator.free(bookmark.tags);
