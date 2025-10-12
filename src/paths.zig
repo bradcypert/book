@@ -29,7 +29,7 @@ pub fn deleteBookmarkFile(allocator: std.mem.Allocator) !void {
 pub fn getBookmarkFile(allocator: std.mem.Allocator, mode: FileMode) !std.fs.File {
     const path = try getBookmarkFilePath(allocator);
     defer allocator.free(path);
-    
+
     const storage_path = try getStoragePath(allocator);
     defer allocator.free(storage_path);
 
@@ -85,42 +85,42 @@ test "getBookmarkFilePath" {
 
 test "getBookmarkFile creates directory and file" {
     const testing = std.testing;
-    
+
     // Get a temporary test path
     const test_file_path = try getBookmarkFilePath(testing.allocator);
     defer testing.allocator.free(test_file_path);
-    
+
     // Clean up any existing test file
     std.fs.cwd().deleteFile(test_file_path) catch {};
-    
+
     // Create the file
     const file = try getBookmarkFile(testing.allocator, .read_write);
     defer file.close();
-    
+
     // Verify file exists and is accessible
     const file_stat = try file.stat();
     try testing.expect(file_stat.size >= 0);
-    
+
     // Clean up
     std.fs.cwd().deleteFile(test_file_path) catch {};
 }
 
 test "getBookmarkFile different modes" {
     const testing = std.testing;
-    
+
     const test_file_path = try getBookmarkFilePath(testing.allocator);
     defer testing.allocator.free(test_file_path);
-    
+
     // Clean up any existing test file
     std.fs.cwd().deleteFile(test_file_path) catch {};
-    
+
     // Create file with write mode
     {
         const file = try getBookmarkFile(testing.allocator, .write_only);
         defer file.close();
         try file.writeAll("test,data,\n");
     }
-    
+
     // Read file with read mode
     {
         const file = try getBookmarkFile(testing.allocator, .read_only);
@@ -129,14 +129,14 @@ test "getBookmarkFile different modes" {
         const bytes_read = try file.readAll(&buffer);
         try testing.expectEqualStrings("test,data,\n", buffer[0..bytes_read]);
     }
-    
+
     // Append to file with append mode
     {
         const file = try getBookmarkFile(testing.allocator, .append);
         defer file.close();
         try file.writeAll("more,data,\n");
     }
-    
+
     // Verify appended data
     {
         const file = try getBookmarkFile(testing.allocator, .read_only);
@@ -145,9 +145,7 @@ test "getBookmarkFile different modes" {
         const bytes_read = try file.readAll(&buffer);
         try testing.expectEqualStrings("test,data,\nmore,data,\n", buffer[0..bytes_read]);
     }
-    
+
     // Clean up
     std.fs.cwd().deleteFile(test_file_path) catch {};
 }
-
-

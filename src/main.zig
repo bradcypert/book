@@ -1,11 +1,15 @@
 const std = @import("std");
+const vaxis = @import("vaxis");
+const vxfw = vaxis.vxfw;
 const storage = @import("storage.zig");
 const paths = @import("paths.zig");
 const browser = @import("browser.zig");
+const tui = @import("tui.zig");
 
 const Bookmark = storage.Bookmark;
 
 const InputAction = enum {
+    TUI,
     Store,
     Open,
     Search,
@@ -15,6 +19,7 @@ const InputAction = enum {
 };
 
 const Input = union(InputAction) {
+    TUI: struct {},
     Store: struct {
         bookmark: []const u8,
         path: []const u8,
@@ -64,6 +69,33 @@ pub fn main() !void {
     }
 
     switch (input) {
+        .TUI => {
+            const file = try paths.getBookmarkFile(allocator, .read_only);
+            defer file.close();
+
+            var buffer: [1024]u8 = undefined;
+            var reader = file.reader(&buffer);
+
+            const results = try Bookmark.search(allocator, &reader.interface, "");
+            defer {
+                for (results) |bookmark| {
+                    allocator.free(bookmark.tags);
+                }
+                allocator.free(results);
+            }
+
+            var bookmarks: std.MultiArrayList(tui.Bookmark) = .empty;
+            defer bookmarks.deinit(allocator);
+            for (results) |bookmark| {
+                try bookmarks.append(allocator, tui.Bookmark{
+                    .value = bookmark.value,
+                    .path = bookmark.path,
+                    .tags = "",
+                });
+            }
+
+            try tui.launch(allocator, bookmarks);
+        },
         .Store => |s| {
             handleStore(allocator, s) catch |err| {
                 try stderr.print("Error storing bookmark: {any}\n", .{err});
@@ -156,6 +188,7 @@ fn handleStore(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined
 
     var buffer: [1024]u8 = undefined;
     var writer = file.writer(&buffer);
+    try writer.seekTo(try writer.file.getEndPos());
 
     var bookmark = Bookmark.init(input.bookmark, input.path);
     bookmark.tags = input.tags;
@@ -298,6 +331,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             try positional_args.append(allocator, arg);
         }
+    }
+
+    if (positional_args.items.len == 0 and !is_list and !is_delete_all) {
+        return Input{ .TUI = .{} };
     }
 
     // Return the appropriate tagged union variant based on flags

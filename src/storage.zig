@@ -133,6 +133,19 @@ test "storeBookmark" {
     try testing.expectEqualStrings("gh,https://www.github.com,dev,code,test123,\n", writer.buffered());
 }
 
+test "storeMultipleBookmarks" {
+    var bookmark = Bookmark.init("gh", "https://www.github.com");
+    bookmark.tags = &.{ "dev", "code", "test123" };
+    var buffer: [1024]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try bookmark.storeBookmark(&writer);
+
+    var bookmark2 = Bookmark.init("x", "https://www.x.com");
+    try bookmark2.storeBookmark(&writer);
+
+    try testing.expectEqualStrings("gh,https://www.github.com,dev,code,test123,\nx,https://www.x.com,\n", writer.buffered());
+}
+
 test "lookupBookmark" {
     // lookup a bookmark from a reader
     const data = "gh,https://www.github.com,dev,code,test123,\n";
