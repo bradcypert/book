@@ -5,19 +5,45 @@ const browser = @import("browser.zig");
 
 const Bookmark = storage.Bookmark;
 
-const Input = struct {
-    bookmark: []const u8,
-    path: []const u8,
-    tags: []const []const u8,
-    search: bool,
-    delete_all: bool,
-    delete: bool,
-    list: bool,
-    i_am_sure: bool,
+const InputAction = enum {
+    Store,
+    Open,
+    Search,
+    Delete,
+    DeleteAll,
+    List,
 };
 
+const Input = union(InputAction) {
+    Store: struct {
+        bookmark: []const u8,
+        path: []const u8,
+        tags: []const []const u8,
+    },
+    Open: struct {
+        bookmark: []const u8,
+    },
+    Search: struct {
+        query: []const u8,
+    },
+    Delete: struct {
+        bookmark: []const u8,
+    },
+    DeleteAll: struct {
+        i_am_sure: bool,
+    },
+    List: struct {},
+};
+
+var stdout_buf: [256]u8 = undefined;
+var stdin_buf: [256]u8 = undefined;
+var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+var stdout = &stdout_writer.interface;
+var stdin = &stdin_reader.interface;
+
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -29,18 +55,25 @@ pub fn main() !void {
         if (input.tags.len > 0) allocator.free(input.tags);
     }
 
-    if (input.delete_all) {
-        try handleDeleteAll(allocator, input);
-    } else if (input.list) {
-        try handleList(allocator);
-    } else if (input.delete and input.bookmark.len > 0) {
-        try handleDelete(allocator, input);
-    } else if (input.path.len > 0) {
-        try handleStore(allocator, input);
-    } else if (input.search) {
-        try handleSearch(allocator, input);
-    } else {
-        try handleOpen(allocator, input);
+    switch (input) {
+        .Store => |b| {
+            try handleStore(allocator, b);
+        },
+        .Open => {
+            try handleOpen(allocator, input);
+        },
+        .Search => {
+            try handleSearch(allocator, input);
+        },
+        .Delete => {
+            try handleDelete(allocator, input);
+        },
+        .DeleteAll => {
+            try handleDeleteAll(allocator, input);
+        },
+        .List => {
+            try handleList(allocator);
+        },
     }
 }
 
@@ -48,13 +81,6 @@ fn handleDeleteAll(allocator: std.mem.Allocator, input: Input) !void {
     var confirmed = input.i_am_sure;
 
     if (!confirmed) {
-        var stdout_buf: [256]u8 = undefined;
-        var stdin_buf: [256]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-        const stdout = &stdout_writer.interface;
-        var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
-        const stdin = &stdin_reader.interface;
-
         _ = try stdout.write("Are you sure you want to delete all bookmarks? [y/N] ");
         try stdout.flush();
 
@@ -65,28 +91,20 @@ fn handleDeleteAll(allocator: std.mem.Allocator, input: Input) !void {
 
     if (confirmed) {
         try paths.deleteBookmarkFile(allocator);
-        var buf: [256]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&buf);
-        const stdout = &stdout_writer.interface;
         _ = try stdout.write("All bookmarks deleted.\n");
         try stdout.flush();
     } else {
-        var buf: [256]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&buf);
-        const stdout = &stdout_writer.interface;
         _ = try stdout.write("Cancelled.\n");
         try stdout.flush();
     }
 }
 
 fn handleDelete(allocator: std.mem.Allocator, input: Input) !void {
-    const file_path = try paths.getBookmarkFilePath(allocator);
-    defer allocator.free(file_path);
+    const in_file = try paths.getBookmarkFile(allocator);
+    defer in_file.close();
 
-    const file_contents = try std.fs.cwd().readFileAlloc(allocator, file_path, 1024 * 1024);
-    defer allocator.free(file_contents);
-
-    var reader = std.Io.Reader.fixed(file_contents);
+    var buffer: [1024]u8 = undefined;
+    var reader = in_file.reader(&buffer);
 
     // Create an allocating writer
     var allocating_writer = std.Io.Writer.Allocating.init(allocator);
@@ -95,13 +113,10 @@ fn handleDelete(allocator: std.mem.Allocator, input: Input) !void {
     try Bookmark.delete(&reader, input.bookmark, &allocating_writer.writer);
 
     // Write to file
-    const file = try std.fs.cwd().createFile(file_path, .{});
+    const file = try std.fs.cwd().createFile(in_file.path, .{});
     defer file.close();
     try file.writeAll(allocating_writer.writer.buffered());
 
-    var buf: [256]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buf);
-    const stdout = &stdout_writer.interface;
     try stdout.print("Deleted bookmark: {s}\n", .{input.bookmark});
     try stdout.flush();
 }
@@ -110,22 +125,15 @@ fn handleStore(allocator: std.mem.Allocator, input: Input) !void {
     const file = try paths.getBookmarkFile(allocator, .append);
     defer file.close();
 
-    // Format the bookmark line: "value,path,tag1,tag2,\n"
-    var line: std.ArrayList(u8) = .empty;
-    defer line.deinit(allocator);
+    var buffer: [1024]u8 = undefined;
+    var writer = file.writer(&buffer);
 
-    try line.writer(allocator).print("{s},{s},", .{ input.bookmark, input.path });
-    for (input.tags) |tag| {
-        try line.writer(allocator).print("{s},", .{tag});
-    }
-    try line.append(allocator, '\n');
+    var bookmark = Bookmark.init(input.bookmark, input.path);
+    bookmark.tags = input.tags;
 
-    // Write directly to the file
-    try file.writeAll(line.items);
+    try bookmark.storeBookmark(&writer.interface);
+    try writer.flush();
 
-    var stdout_buf: [256]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-    const stdout = &stdout_writer.interface;
     try stdout.print("Stored bookmark: {s} -> {s}\n", .{ input.bookmark, input.path });
     try stdout.flush();
 }
@@ -183,10 +191,6 @@ fn handleOpen(allocator: std.mem.Allocator, input: Input) !void {
 }
 
 fn printTable(_: std.mem.Allocator, bookmarks: []const Bookmark) !void {
-    var buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buf);
-    const stdout = &stdout_writer.interface;
-
     // Print header
     _ = try stdout.write("Bookmark          Path                                      Tags\n");
     _ = try stdout.write("----------------  ----------------------------------------  --------------------\n");
