@@ -37,10 +37,13 @@ const Input = union(InputAction) {
 
 var stdout_buf: [256]u8 = undefined;
 var stdin_buf: [256]u8 = undefined;
+var stderr_buf: [256]u8 = undefined;
 var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
 var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
 var stdout = &stdout_writer.interface;
 var stdin = &stdin_reader.interface;
+var stderr = &stderr_writer.interface;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
@@ -48,7 +51,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const input = parseArgs(allocator) catch |err| {
-        std.debug.print("Error: {}\n", .{err});
+        std.debug.print("Error: {any}\n", .{err});
         return err;
     };
     defer {
@@ -62,22 +65,40 @@ pub fn main() !void {
 
     switch (input) {
         .Store => |s| {
-            try handleStore(allocator, s);
+            handleStore(allocator, s) catch |err| {
+                try stderr.print("Error storing bookmark: {any}\n", .{err});
+                try stderr.flush();
+            };
         },
         .Open => |o| {
-            try handleOpen(allocator, o);
+            handleOpen(allocator, o) catch {
+                try stderr.print("Bookmark not found: {s}\n", .{o.bookmark});
+                try stderr.flush();
+            };
         },
         .Search => |s| {
-            try handleSearch(allocator, s);
+            handleSearch(allocator, s) catch |err| {
+                try stderr.print("Error searching bookmarks: {any}\n", .{err});
+                try stderr.flush();
+            };
         },
         .Delete => |d| {
-            try handleDelete(allocator, d);
+            handleDelete(allocator, d) catch |err| {
+                try stderr.print("Error deleting bookmark: {any}\n", .{err});
+                try stderr.flush();
+            };
         },
         .DeleteAll => |da| {
-            try handleDeleteAll(allocator, da);
+            handleDeleteAll(allocator, da) catch |err| {
+                try stderr.print("Error deleting all bookmarks: {any}\n", .{err});
+                try stderr.flush();
+            };
         },
         .List => {
-            try handleList(allocator);
+            handleList(allocator) catch |err| {
+                try stderr.print("Error listing bookmarks: {any}\n", .{err});
+                try stderr.flush();
+            };
         },
     }
 }
@@ -105,8 +126,11 @@ fn handleDeleteAll(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undef
 }
 
 fn handleDelete(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Delete)) !void {
-    const in_file = try paths.getBookmarkFile(allocator);
+    const in_file = try paths.getBookmarkFile(allocator, .read_only);
     defer in_file.close();
+
+    const bookmark_file_path = try paths.getBookmarkFilePath(allocator);
+    defer allocator.free(bookmark_file_path);
 
     var buffer: [1024]u8 = undefined;
     var reader = in_file.reader(&buffer);
@@ -115,10 +139,10 @@ fn handleDelete(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefine
     var allocating_writer = std.Io.Writer.Allocating.init(allocator);
     defer allocating_writer.deinit();
 
-    try Bookmark.delete(&reader, input.bookmark, &allocating_writer.writer);
+    try Bookmark.delete(&reader.interface, input.bookmark, &allocating_writer.writer);
 
     // Write to file
-    const file = try std.fs.cwd().createFile(in_file.path, .{});
+    const file = try std.fs.cwd().createFile(bookmark_file_path, .{});
     defer file.close();
     try file.writeAll(allocating_writer.writer.buffered());
 
@@ -137,7 +161,7 @@ fn handleStore(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined
     bookmark.tags = input.tags;
 
     try bookmark.storeBookmark(&writer.interface);
-    try writer.flush();
+    try writer.interface.flush();
 
     try stdout.print("Stored bookmark: {s} -> {s}\n", .{ input.bookmark, input.path });
     try stdout.flush();
@@ -187,7 +211,6 @@ fn handleOpen(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined)
 
     var reader = std.Io.Reader.fixed(file_contents);
     const bookmark = Bookmark.lookup(allocator, &reader, input.bookmark) catch |err| {
-        std.debug.print("Bookmark not found: {s}\n", .{input.bookmark});
         return err;
     };
     defer allocator.free(bookmark.tags);
