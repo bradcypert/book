@@ -52,24 +52,29 @@ pub fn main() !void {
         return err;
     };
     defer {
-        if (input.tags.len > 0) allocator.free(input.tags);
+        switch (input) {
+            .Store => |s| {
+                if (s.tags.len > 0) allocator.free(s.tags);
+            },
+            else => {},
+        }
     }
 
     switch (input) {
-        .Store => |b| {
-            try handleStore(allocator, b);
+        .Store => |s| {
+            try handleStore(allocator, s);
         },
-        .Open => {
-            try handleOpen(allocator, input);
+        .Open => |o| {
+            try handleOpen(allocator, o);
         },
-        .Search => {
-            try handleSearch(allocator, input);
+        .Search => |s| {
+            try handleSearch(allocator, s);
         },
-        .Delete => {
-            try handleDelete(allocator, input);
+        .Delete => |d| {
+            try handleDelete(allocator, d);
         },
-        .DeleteAll => {
-            try handleDeleteAll(allocator, input);
+        .DeleteAll => |da| {
+            try handleDeleteAll(allocator, da);
         },
         .List => {
             try handleList(allocator);
@@ -77,7 +82,7 @@ pub fn main() !void {
     }
 }
 
-fn handleDeleteAll(allocator: std.mem.Allocator, input: Input) !void {
+fn handleDeleteAll(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).DeleteAll)) !void {
     var confirmed = input.i_am_sure;
 
     if (!confirmed) {
@@ -99,7 +104,7 @@ fn handleDeleteAll(allocator: std.mem.Allocator, input: Input) !void {
     }
 }
 
-fn handleDelete(allocator: std.mem.Allocator, input: Input) !void {
+fn handleDelete(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Delete)) !void {
     const in_file = try paths.getBookmarkFile(allocator);
     defer in_file.close();
 
@@ -121,7 +126,7 @@ fn handleDelete(allocator: std.mem.Allocator, input: Input) !void {
     try stdout.flush();
 }
 
-fn handleStore(allocator: std.mem.Allocator, input: Input) !void {
+fn handleStore(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Store)) !void {
     const file = try paths.getBookmarkFile(allocator, .append);
     defer file.close();
 
@@ -156,13 +161,13 @@ fn handleList(allocator: std.mem.Allocator) !void {
     try printTable(allocator, results);
 }
 
-fn handleSearch(allocator: std.mem.Allocator, input: Input) !void {
+fn handleSearch(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Search)) !void {
     const file = try paths.getBookmarkFile(allocator, .read_only);
     defer file.close();
 
     var buffer: [1024]u8 = undefined;
     var reader = file.reader(&buffer);
-    const results = try Bookmark.search(allocator, &reader.interface, input.bookmark);
+    const results = try Bookmark.search(allocator, &reader.interface, input.query);
     defer {
         for (results) |bookmark| {
             allocator.free(bookmark.tags);
@@ -173,7 +178,7 @@ fn handleSearch(allocator: std.mem.Allocator, input: Input) !void {
     try printTable(allocator, results);
 }
 
-fn handleOpen(allocator: std.mem.Allocator, input: Input) !void {
+fn handleOpen(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Open)) !void {
     const file = try paths.getBookmarkFile(allocator, .read_only);
     defer file.close();
 
@@ -236,22 +241,17 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
     // Skip program name
     _ = args.skip();
 
-    var input = Input{
-        .bookmark = "",
-        .path = "",
-        .tags = &[_][]const u8{},
-        .search = false,
-        .delete_all = false,
-        .delete = false,
-        .list = false,
-        .i_am_sure = false,
-    };
-
     var tags_list: std.ArrayList([]const u8) = .empty;
     defer tags_list.deinit(allocator);
 
     var positional_args: std.ArrayList([]const u8) = .empty;
     defer positional_args.deinit(allocator);
+
+    var is_search = false;
+    var is_delete_all = false;
+    var is_delete = false;
+    var is_list = false;
+    var i_am_sure = false;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-tags") or std.mem.eql(u8, arg, "--tags")) {
@@ -263,35 +263,57 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
                 }
             }
         } else if (std.mem.eql(u8, arg, "-search") or std.mem.eql(u8, arg, "--search")) {
-            input.search = true;
+            is_search = true;
         } else if (std.mem.eql(u8, arg, "-deleteAll") or std.mem.eql(u8, arg, "--deleteAll")) {
-            input.delete_all = true;
+            is_delete_all = true;
         } else if (std.mem.eql(u8, arg, "-yes") or std.mem.eql(u8, arg, "--yes")) {
-            input.i_am_sure = true;
+            i_am_sure = true;
         } else if (std.mem.eql(u8, arg, "-delete") or std.mem.eql(u8, arg, "--delete")) {
-            input.delete = true;
+            is_delete = true;
         } else if (std.mem.eql(u8, arg, "-list") or std.mem.eql(u8, arg, "--list")) {
-            input.list = true;
+            is_list = true;
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             try positional_args.append(allocator, arg);
         }
     }
 
-    // Parse positional arguments
-    if (positional_args.items.len > 0) {
-        input.bookmark = positional_args.items[0];
+    // Return the appropriate tagged union variant based on flags
+    if (is_delete_all) {
+        return Input{ .DeleteAll = .{ .i_am_sure = i_am_sure } };
     }
+
+    if (is_list) {
+        return Input{ .List = .{} };
+    }
+
+    const bookmark = if (positional_args.items.len > 0) positional_args.items[0] else "";
+
+    if (is_delete) {
+        if (bookmark.len == 0) return error.BookmarkRequired;
+        return Input{ .Delete = .{ .bookmark = bookmark } };
+    }
+
+    if (is_search) {
+        if (bookmark.len == 0) return error.BookmarkRequired;
+        return Input{ .Search = .{ .query = bookmark } };
+    }
+
+    // If we have a path (2nd positional arg), this is a Store operation
     if (positional_args.items.len > 1) {
-        input.path = positional_args.items[1];
+        const tags = try tags_list.toOwnedSlice(allocator);
+        return Input{ .Store = .{
+            .bookmark = bookmark,
+            .path = positional_args.items[1],
+            .tags = tags,
+        } };
     }
 
-    // Validate
-    if (input.bookmark.len == 0 and !input.delete_all and !input.list) {
-        return error.BookmarkRequired;
+    // Otherwise, if we have just a bookmark, this is an Open operation
+    if (bookmark.len > 0) {
+        return Input{ .Open = .{ .bookmark = bookmark } };
     }
 
-    input.tags = try tags_list.toOwnedSlice(allocator);
-    return input;
+    return error.BookmarkRequired;
 }
 
 test {
