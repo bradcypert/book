@@ -22,10 +22,18 @@ pub const Bookmark = struct {
         _ = try writer.write("\n");
     }
 
-    pub fn deleteBookmark(self: Bookmark, writer: *std.Io.Writer, reader: std.Io.Reader) !void {
-        while (!std.mem.eql(u8, reader.peek(self.value.len), self.value))
-            reader.streamDelimiter(writer, "\n");
-        reader.streamRemaining(writer);
+    pub fn deleteBookmark(self: Bookmark, writer: *std.Io.Writer, reader: *std.Io.Reader) !void {
+        while (reader.peekDelimiterInclusive('\n')) |line| {
+            if (line.len >= self.value.len and !std.mem.eql(u8, line[0..self.value.len], self.value)) {
+                _ = try reader.streamDelimiter(writer, '\n');
+                try writer.writeByte('\n');
+            } else {
+                reader.toss(line.len);
+            }
+        } else |err| switch (err) {
+            error.EndOfStream => {},
+            else => |e| return e,
+        }
     }
 
     pub fn lookup(allocator: std.mem.Allocator, reader: *std.Io.Reader, value: []const u8) !Bookmark {
@@ -194,7 +202,7 @@ test "searchBookmarksAll" {
     try testing.expectEqual(@as(usize, 2), results.len);
 }
 
-test "deleteBookmark" {
+test "delete" {
     const data =
         \\gh,https://www.github.com,dev,code,
         \\gl,https://gitlab.com,dev,ci,
@@ -252,4 +260,38 @@ test "searchBookmarksNoTrailingNewline" {
     }
 
     try testing.expectEqual(@as(usize, 0), results.len); // StreamTooLong means no delimiter found, so no complete lines
+}
+
+test "deleteBookmark" {
+    var bookmark = Bookmark.init("gl", "https://www.github.com");
+
+    var buffer: [128]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+
+    const data =
+        \\gh,https://www.github.com,dev,code,
+        \\gl,https://gitlab.com,dev,ci,
+        \\hn,https://news.ycombinator.com,news,tech,
+        \\
+    ;
+    var reader = std.Io.Reader.fixed(data);
+
+    try bookmark.deleteBookmark(&writer, &reader);
+
+    var result_reader = std.Io.Reader.fixed(&buffer);
+    const results = try Bookmark.search(
+        testing.allocator,
+        &result_reader,
+        "",
+    );
+    defer {
+        for (results) |bm| {
+            testing.allocator.free(bm.tags);
+        }
+        testing.allocator.free(results);
+    }
+
+    try testing.expectEqual(@as(usize, 2), results.len);
+    try testing.expectEqualStrings("gh", results[0].value);
+    try testing.expectEqualStrings("hn", results[1].value);
 }
