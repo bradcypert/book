@@ -29,12 +29,7 @@ pub const Bookmark = struct {
     }
 
     pub fn lookup(allocator: std.mem.Allocator, reader: *std.Io.Reader, value: []const u8) !Bookmark {
-        while (true) {
-            const line = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
-                error.EndOfStream, error.StreamTooLong => return error.NotFound,
-                else => |e| return e,
-            };
-
+        while (reader.takeDelimiterExclusive('\n')) |line| {
             var iter = std.mem.splitScalar(u8, line, ',');
             const first = iter.first();
             if (std.mem.eql(u8, first, value)) {
@@ -55,6 +50,9 @@ pub const Bookmark = struct {
                     .tags = try tags.toOwnedSlice(allocator),
                 };
             }
+        } else |err| switch (err) {
+            error.EndOfStream, error.StreamTooLong => return error.NotFound,
+            else => |e| return e,
         }
     }
 
@@ -70,11 +68,7 @@ pub const Bookmark = struct {
             results.deinit(allocator);
         }
 
-        while (true) {
-            const line = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
-                error.EndOfStream, error.StreamTooLong => break,
-                else => |e| return e,
-            };
+        while (reader.takeDelimiterExclusive('\n')) |line| {
 
             // If query is empty, match all lines. Otherwise check if line contains query
             if (query.len == 0 or std.mem.indexOf(u8, line, query) != null) {
@@ -97,6 +91,9 @@ pub const Bookmark = struct {
                     .tags = try tags.toOwnedSlice(allocator),
                 });
             }
+        } else |err| switch (err) {
+            error.EndOfStream, error.StreamTooLong => {},
+            else => |e| return e,
         }
 
         return results.toOwnedSlice(allocator);
@@ -105,11 +102,7 @@ pub const Bookmark = struct {
     /// Delete a bookmark by name. Reads all bookmarks from reader, filters out the one
     /// matching the bookmark name, and writes the remaining bookmarks to writer.
     pub fn delete(reader: *std.Io.Reader, bookmark_name: []const u8, writer: *std.Io.Writer) !void {
-        while (true) {
-            const line = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
-                error.EndOfStream, error.StreamTooLong => break,
-                else => |e| return e,
-            };
+        while (reader.takeDelimiterExclusive('\n')) |line| {
 
             // Check if this line starts with the bookmark name followed by a comma
             const prefix_len = bookmark_name.len + 1; // name + comma
@@ -118,6 +111,9 @@ pub const Bookmark = struct {
                 try writer.writeAll(line);
                 try writer.writeByte('\n');
             }
+        } else |err| switch (err) {
+            error.EndOfStream, error.StreamTooLong => {},
+            else => |e| return e,
         }
     }
 };
