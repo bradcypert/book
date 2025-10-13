@@ -8,36 +8,32 @@ const tui = @import("tui.zig");
 
 const Bookmark = storage.Bookmark;
 
-const InputAction = enum {
-    TUI,
-    Store,
-    Open,
-    Search,
-    Delete,
-    DeleteAll,
-    List,
+const InputBookmark = struct {
+    bookmark: []const u8,
 };
 
-const Input = union(InputAction) {
-    TUI: struct {},
-    Store: struct {
-        bookmark: []const u8,
-        path: []const u8,
-        tags: []const []const u8,
-    },
-    Open: struct {
-        bookmark: []const u8,
-    },
-    Search: struct {
-        query: []const u8,
-    },
-    Delete: struct {
-        bookmark: []const u8,
-    },
-    DeleteAll: struct {
-        i_am_sure: bool,
-    },
-    List: struct {},
+const InputConfirm = struct {
+    i_am_sure: bool,
+};
+
+const InputSearch = struct {
+    query: []const u8,
+};
+
+const InputStore = struct {
+    bookmark: []const u8,
+    path: []const u8,
+    tags: []const []const u8,
+};
+
+const Input = union(enum) {
+    TUI: void,
+    Store: InputStore,
+    Open: InputBookmark,
+    Search: InputSearch,
+    Delete: InputBookmark,
+    DeleteAll: InputConfirm,
+    List: void,
 };
 
 var stdout_buf: [256]u8 = undefined;
@@ -135,7 +131,7 @@ pub fn main() !void {
     }
 }
 
-fn handleDeleteAll(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).DeleteAll)) !void {
+fn handleDeleteAll(allocator: std.mem.Allocator, input: InputConfirm) !void {
     var confirmed = input.i_am_sure;
 
     if (!confirmed) {
@@ -157,7 +153,7 @@ fn handleDeleteAll(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undef
     }
 }
 
-fn handleDelete(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Delete)) !void {
+fn handleDelete(allocator: std.mem.Allocator, input: InputBookmark) !void {
     const in_file = try paths.getBookmarkFile(allocator, .read_only);
     defer in_file.close();
 
@@ -182,7 +178,7 @@ fn handleDelete(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefine
     try stdout.flush();
 }
 
-fn handleStore(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Store)) !void {
+fn handleStore(allocator: std.mem.Allocator, input: InputStore) !void {
     const file = try paths.getBookmarkFile(allocator, .append);
     defer file.close();
 
@@ -218,7 +214,7 @@ fn handleList(allocator: std.mem.Allocator) !void {
     try printTable(allocator, results);
 }
 
-fn handleSearch(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Search)) !void {
+fn handleSearch(allocator: std.mem.Allocator, input: InputSearch) !void {
     const file = try paths.getBookmarkFile(allocator, .read_only);
     defer file.close();
 
@@ -235,7 +231,7 @@ fn handleSearch(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefine
     try printTable(allocator, results);
 }
 
-fn handleOpen(allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Open)) !void {
+fn handleOpen(allocator: std.mem.Allocator, input: InputBookmark) !void {
     const file = try paths.getBookmarkFile(allocator, .read_only);
     defer file.close();
 
@@ -334,7 +330,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
     }
 
     if (positional_args.items.len == 0 and !is_list and !is_delete_all) {
-        return Input{ .TUI = .{} };
+        return Input{ .TUI = {} };
     }
 
     // Return the appropriate tagged union variant based on flags
@@ -343,7 +339,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
     }
 
     if (is_list) {
-        return Input{ .List = .{} };
+        return Input{ .List = {} };
     }
 
     const bookmark = if (positional_args.items.len > 0) positional_args.items[0] else "";
