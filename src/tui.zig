@@ -86,6 +86,19 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
                 // Change Column
                 if (key.matchesAny(&.{ vaxis.Key.left, 'h' }, .{})) demo_tbl.col -|= 1;
                 if (key.matchesAny(&.{ vaxis.Key.right, 'l' }, .{})) demo_tbl.col +|= 1;
+                if (key.matches(vaxis.Key.space, .{})) {
+                    const rows = demo_tbl.sel_rows orelse createRows: {
+                        demo_tbl.sel_rows = try allocator.alloc(u16, 1);
+                        break :createRows demo_tbl.sel_rows.?;
+                    };
+                    var rows_list = std.ArrayList(u16).fromOwnedSlice(rows);
+                    for (rows_list.items, 0..) |row, idx| {
+                        if (row != demo_tbl.row) continue;
+                        _ = rows_list.orderedRemove(idx);
+                        break;
+                    } else try rows_list.append(allocator, demo_tbl.row);
+                    demo_tbl.sel_rows = try rows_list.toOwnedSlice(allocator);
+                }
             },
             .winsize => |ws| try vx.resize(allocator, tty.writer(), ws),
             else => {},
@@ -101,6 +114,7 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
         });
 
         if (bookmarks.items(.path).len > 0) {
+            demo_tbl.active = true;
             try vaxis.widgets.Table.drawTable(event_alloc, middle_bar, bookmarks, &demo_tbl);
         }
 
