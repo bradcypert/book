@@ -1,40 +1,53 @@
-# .github/workflows/release.yml
-name: goreleaser
-
-on:
-  push:
-    # run only against tags
-    tags:
-      - "*"
-
-permissions:
-  contents: write
-  # packages: write
-  # issues: write
+name: Release
+on: push
 
 jobs:
-  goreleaser:
+  release:
+    name: Release
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Clone repository
+        uses: actions/checkout@v3
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
         with:
-          fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v5
+          version: 0.15.1
+
+      - name: Build Windows 
+        run: "zig build -Dtarget=x86_64-windows -Doptimize=ReleaseSafe -Dexe_name=book_windows_x86"
+
+      - name: Build Mac_x86 
+        run: "zig build -Dtarget=x86_64-macos -Doptimize=ReleaseSafe -Dexe_name=book_mac_x86"
+
+      - name: Build Mac_ARM 
+        run: "zig build -Dtarget=aarch64-macos -Doptimize=ReleaseSafe -Dexe_name=book_mac_arm"
+
+      - name: Build Linux_x86 
+        run: "zig build -Dtarget=x86_64-linux -Doptimize=ReleaseSafe -Dexe_name=book_linux_x86"
+
+      - name: Build Linux_ARM
+        run: "zig build -Dtarget=aarch64-linux -Doptimize=ReleaseSafe -Dexe_name=book_linux_arm"
+
+      - name: Generate Checksums
+        run: |
+          cd ./zig-out/bin
+          sha256sum book_windows_x86.exe httpspec_mac_x86 httpspec_mac_arm httpspec_linux_x86 httpspec_linux_arm > checksums.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          go-version: stable
-      # More assembly might be required: Docker logins, GPG, etc.
-      # It all depends on your needs.
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
-          distribution: goreleaser
-          # 'latest', 'nightly', or a semver
-          version: "~> v1"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
-          # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+          files: |
+            ./zig-out/bin/book_windows_x86.exe
+            ./zig-out/bin/book_mac_x86
+            ./zig-out/bin/book_mac_arm
+            ./zig-out/bin/book_linux_x86
+            ./zig-out/bin/book_linux_arm
+            ./zig-out/bin/checksums.txt
+            LICENSE
+
