@@ -9,7 +9,6 @@ pub const Bookmark = struct {
 };
 
 pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookmark)) !void {
-    // Remove me and use real bookmark data
     var buffer: [1024]u8 = undefined;
     var tty = try vaxis.Tty.init(&buffer);
     defer tty.deinit();
@@ -49,7 +48,7 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
             },
         },
         //.header_align = .left,
-        .col_indexes = .{ .by_idx = &.{ 0, 1, 2, 4, 3 } },
+        .col_indexes = .{ .by_idx = &.{ 0, 1, 2 } },
         //.col_align = .{ .by_idx = &.{ .left, .left, .center, .center, .left } },
         //.col_align = .{ .all = .center },
         //.header_borders = true,
@@ -96,7 +95,7 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
         win.clear();
         const middle_bar = win.child(.{
             .x_off = 0,
-            .y_off = win.height / 6,
+            .y_off = 0,
             .width = win.width,
             .height = win.height,
         });
