@@ -8,7 +8,7 @@ pub const Bookmark = struct {
     tags: []const u8,
 };
 
-pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookmark)) !void {
+pub fn launch(allocator: std.mem.Allocator, bookmarks: []Bookmark) !void {
     var buffer: [1024]u8 = undefined;
     var tty = try vaxis.Tty.init(&buffer);
     defer tty.deinit();
@@ -68,7 +68,6 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
     while (true) {
         defer _ = event_arena.reset(.retain_capacity);
         defer tty_writer.flush() catch {};
-        const event_alloc = event_arena.allocator();
         const event = loop.nextEvent();
 
         switch (event) {
@@ -113,9 +112,9 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
             .height = win.height,
         });
 
-        if (bookmarks.items(.path).len > 0) {
+        if (bookmarks.len > 0) {
             demo_tbl.active = true;
-            try vaxis.widgets.Table.drawTable(event_alloc, middle_bar, bookmarks, &demo_tbl);
+            try vaxis.widgets.Table.drawTable(null, middle_bar, bookmarks, &demo_tbl);
         }
 
         try vx.render(tty_writer);

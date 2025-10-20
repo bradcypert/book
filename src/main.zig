@@ -84,16 +84,15 @@ pub fn main() !void {
                 allocator.free(results);
             }
 
-            var bookmarks: std.MultiArrayList(tui.Bookmark) = .empty;
-            defer bookmarks.deinit(allocator);
-            for (results) |bookmark| {
-                try bookmarks.append(allocator, tui.Bookmark{
+            var bookmarks = try allocator.alloc(tui.Bookmark, results.len);
+            defer allocator.free(bookmarks);
+            for (results, 0..) |bookmark, i| {
+                bookmarks[i] = tui.Bookmark{
                     .value = bookmark.value,
                     .path = bookmark.path,
                     .tags = "",
-                });
+                };
             }
-
             try tui.launch(allocator, bookmarks);
         },
         .Store => |s| {
