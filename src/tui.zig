@@ -1,5 +1,6 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
+const browser = @import("./browser.zig");
 const vxfw = vaxis.vxfw;
 
 pub const Bookmark = struct {
@@ -98,6 +99,13 @@ pub fn launch(allocator: std.mem.Allocator, bookmarks: std.MultiArrayList(Bookma
                         break;
                     } else try rows_list.append(allocator, demo_tbl.row);
                     demo_tbl.sel_rows = try rows_list.toOwnedSlice(allocator);
+                }
+                if (key.matches(vaxis.Key.enter, .{})) {
+                    const selected = if (demo_tbl.sel_rows) |rows| rows else &[_]u16{demo_tbl.row};
+                    for (selected) |sel_idx| {
+                        const bm = bookmarks.get(sel_idx);
+                        try browser.openExternal(bm.path);
+                    }
                 }
             },
             .winsize => |ws| try vx.resize(allocator, tty.writer(), ws),
