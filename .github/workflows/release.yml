@@ -36,7 +36,7 @@ jobs:
       - name: Generate Checksums
         run: |
           cd ./zig-out/bin
-          sha256sum book_windows_x86.exe httpspec_mac_x86 httpspec_mac_arm httpspec_linux_x86 httpspec_linux_arm > checksums.txt
+          sha256sum book_windows_x86.exe book_mac_x86 book_mac_arm book_linux_x86 book_linux_arm > checksums.txt
 
       - name: Release
         uses: softprops/action-gh-release@v2
