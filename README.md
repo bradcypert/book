@@ -4,37 +4,69 @@ Book is a simple program for managing and opening bookmarks in your terminal. Th
 
 Book is backed by a CSV file, making it extremely easy to share bookmarks or manipulate your bookmarks with your own programs as well.
 
+## Basic Usage
+
 ```bash
 # Add a new bookmark "gh" pointing to github.com
 book gh https://www.github.com
 
-# Open the "gh" bookmark
+# Add a bookmark with tags (comma-separated)
+book gh https://www.github.com --tags dev,code,social
+
+# Open the "gh" bookmark (opens in your default browser)
 book gh
 ```
 
-## Listing all bookmarks
+## Listing bookmarks
+
 ```bash
+# List all bookmarks
 book --list
 ```
 
-## Deleting a bookmark by the bookmark key
-
-```bash
-book --delete gh
-```
-
-## Deleting all bookmarks
-
-```bash
-book --deleteAll
-```
-
-There is no confirmation for this action.
-
 ## Searching for bookmarks
+
 ```bash
 # Search all bookmarks for the word "github" in the bookmark value, path, or tag
-book -search github
+book --search github
+```
+
+## Exporting bookmarks
+
+```bash
+# Export all bookmarks to stdout
+book --export
+
+# Export bookmarks with specific tags to stdout
+book --export --tags dev,code
+
+# Export all bookmarks to a file
+book --export --output bookmarks.csv
+# Or use the short flag
+book --export -o bookmarks.csv
+
+# Export bookmarks with specific tags to a file
+book --export --tags dev,code --output dev_bookmarks.csv
+```
+
+## Deleting bookmarks
+
+```bash
+# Delete a specific bookmark by key
+book --delete gh
+
+# Delete all bookmarks (prompts for confirmation)
+book --deleteAll
+
+# Delete all bookmarks without confirmation
+book --deleteAll --yes
+```
+
+## Interactive TUI Mode
+
+```bash
+# Launch interactive terminal UI (no arguments)
+book
 ```
 
 ## Where are my bookmarks, though?
