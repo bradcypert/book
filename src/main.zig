@@ -16,6 +16,7 @@ const InputAction = enum {
     Delete,
     DeleteAll,
     List,
+    Export,
 };
 
 const Input = union(InputAction) {
@@ -30,6 +31,7 @@ const Input = union(InputAction) {
     },
     Search: struct {
         query: []const u8,
+        tags: []const []const u8 = &.{},
     },
     Delete: struct {
         bookmark: []const u8,
@@ -38,6 +40,10 @@ const Input = union(InputAction) {
         i_am_sure: bool,
     },
     List: struct {},
+    Export: struct {
+        tags: []const []const u8,
+        output: ?[]const u8 = null,
+    },
 };
 
 const CLI = struct {
@@ -55,6 +61,9 @@ const CLI = struct {
                 .Store => |s| {
                     if (s.tags.len > 0) allocator.free(s.tags);
                 },
+                .Export => |e| {
+                    if (e.tags.len > 0) allocator.free(e.tags);
+                },
                 else => {},
             }
         }
@@ -66,7 +75,10 @@ const CLI = struct {
                 var buffer: [1024]u8 = undefined;
                 var reader = file.reader(&buffer);
 
-                const results = try Bookmark.search(allocator, &reader.interface, "");
+                const results = try Bookmark.search(allocator, &reader.interface, .{
+                    .query = "",
+                    .tags = null,
+                });
                 defer {
                     for (results) |bookmark| {
                         allocator.free(bookmark.tags);
@@ -122,6 +134,50 @@ const CLI = struct {
                     try self.stderr.flush();
                 };
             },
+            .Export => |e| {
+                self.handleExport(allocator, e) catch |err| {
+                    try self.stderr.print("Error exporting bookmarks: {any}\n", .{err});
+                    try self.stderr.flush();
+                };
+            },
+        }
+    }
+
+    fn handleExport(self: @This(), allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Export)) !void {
+        const file = try paths.getBookmarkFile(allocator, .read_only);
+        defer file.close();
+
+        var buffer: [1024]u8 = undefined;
+        var reader = file.reader(&buffer);
+        const tags_to_search = if (input.tags.len == 0) null else input.tags;
+        const results = try Bookmark.search(allocator, &reader.interface, .{ .tags = tags_to_search });
+        defer {
+            for (results) |bookmark| {
+                allocator.free(bookmark.tags);
+            }
+            allocator.free(results);
+        }
+
+        // If output file is specified, write to file; otherwise write to stdout
+        if (input.output) |output_path| {
+            const out_file = try std.fs.cwd().createFile(output_path, .{});
+            defer out_file.close();
+            
+            var out_buffer: [1024]u8 = undefined;
+            var writer = out_file.writer(&out_buffer);
+            
+            for (results) |result| {
+                try result.print(&writer.interface);
+            }
+            try writer.interface.flush();
+            
+            try self.stdout.print("Exported {d} bookmark(s) to: {s}\n", .{ results.len, output_path });
+            try self.stdout.flush();
+        } else {
+            for (results) |result| {
+                try result.print(self.stdout);
+            }
+            try self.stdout.flush();
         }
     }
 
@@ -183,7 +239,7 @@ const CLI = struct {
         var bookmark = Bookmark.init(input.bookmark, input.path);
         bookmark.tags = input.tags;
 
-        try bookmark.storeBookmark(&writer.interface);
+        try bookmark.print(&writer.interface);
         try writer.interface.flush();
 
         try self.stdout.print("Stored bookmark: {s} -> {s}\n", .{ input.bookmark, input.path });
@@ -197,7 +253,7 @@ const CLI = struct {
         var buffer: [1024]u8 = undefined;
         var reader = file.reader(&buffer);
 
-        const results = try Bookmark.search(allocator, &reader.interface, "");
+        const results = try Bookmark.search(allocator, &reader.interface, .{ .query = "" });
         defer {
             for (results) |bookmark| {
                 allocator.free(bookmark.tags);
@@ -214,7 +270,7 @@ const CLI = struct {
 
         var buffer: [1024]u8 = undefined;
         var reader = file.reader(&buffer);
-        const results = try Bookmark.search(allocator, &reader.interface, input.query);
+        const results = try Bookmark.search(allocator, &reader.interface, .{ .query = input.query, .tags = input.tags });
         defer {
             for (results) |bookmark| {
                 allocator.free(bookmark.tags);
@@ -323,6 +379,8 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
     var is_delete = false;
     var is_list = false;
     var i_am_sure = false;
+    var is_export = false;
+    var output_path: ?[]const u8 = null;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-tags") or std.mem.eql(u8, arg, "--tags")) {
@@ -333,6 +391,8 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
                     try tags_list.append(allocator, tag);
                 }
             }
+        } else if (std.mem.eql(u8, arg, "-output") or std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
+            output_path = args.next() orelse return error.MissingOutputPath;
         } else if (std.mem.eql(u8, arg, "-search") or std.mem.eql(u8, arg, "--search")) {
             is_search = true;
         } else if (std.mem.eql(u8, arg, "-deleteAll") or std.mem.eql(u8, arg, "--deleteAll")) {
@@ -341,6 +401,8 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
             i_am_sure = true;
         } else if (std.mem.eql(u8, arg, "-delete") or std.mem.eql(u8, arg, "--delete")) {
             is_delete = true;
+        } else if (std.mem.eql(u8, arg, "-export") or std.mem.eql(u8, arg, "--export")) {
+            is_export = true;
         } else if (std.mem.eql(u8, arg, "-list") or std.mem.eql(u8, arg, "--list")) {
             is_list = true;
         } else if (!std.mem.startsWith(u8, arg, "-")) {
@@ -348,7 +410,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
         }
     }
 
-    if (positional_args.items.len == 0 and !is_list and !is_delete_all) {
+    if (positional_args.items.len == 0 and !is_list and !is_delete_all and !is_export) {
         return Input{ .TUI = .{} };
     }
 
@@ -362,6 +424,14 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
     }
 
     const bookmark = if (positional_args.items.len > 0) positional_args.items[0] else "";
+
+    if (is_export) {
+        const tags = try tags_list.toOwnedSlice(allocator);
+        return Input{ .Export = .{
+            .tags = tags,
+            .output = output_path,
+        } };
+    }
 
     if (is_delete) {
         if (bookmark.len == 0) return error.BookmarkRequired;

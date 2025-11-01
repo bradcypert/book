@@ -14,7 +14,7 @@ pub const Bookmark = struct {
         };
     }
 
-    pub fn storeBookmark(self: Bookmark, writer: *std.Io.Writer) !void {
+    pub fn print(self: Bookmark, writer: *std.Io.Writer) !void {
         try writer.print("{s},{s},", .{ self.value, self.path });
         for (self.tags) |tag| {
             try writer.print("{s},", .{tag});
@@ -64,10 +64,14 @@ pub const Bookmark = struct {
         }
     }
 
+    const SearchQuery = struct {
+        query: ?[]const u8 = null,
+        tags: ?[]const []const u8 = null,
+    };
     /// Search bookmarks by query string. Searches in bookmark name, path, and tags.
     /// Returns all bookmarks that contain the query string anywhere in their data.
     /// Caller owns returned slice and must free it.
-    pub fn search(allocator: std.mem.Allocator, reader: *std.Io.Reader, query: []const u8) ![]Bookmark {
+    pub fn search(allocator: std.mem.Allocator, reader: *std.Io.Reader, searchFields: SearchQuery) ![]Bookmark {
         var results: std.ArrayList(Bookmark) = .empty;
         errdefer {
             for (results.items) |bookmark| {
@@ -77,9 +81,25 @@ pub const Bookmark = struct {
         }
 
         while (reader.takeDelimiterExclusive('\n')) |line| {
+            // Check if query matches
+            const query_match = if (searchFields.query) |query|
+                query.len == 0 or std.mem.indexOf(u8, line, query) != null
+            else
+                true;
 
-            // If query is empty, match all lines. Otherwise check if line contains query
-            if (query.len == 0 or std.mem.indexOf(u8, line, query) != null) {
+            // Check if any search tags match the line
+            var tags_match = true;
+            if (searchFields.tags) |tags| {
+                tags_match = false;
+                for (tags) |tag| {
+                    if (std.mem.indexOf(u8, line, tag) != null) {
+                        tags_match = true;
+                        break;
+                    }
+                }
+            }
+
+            if (query_match and tags_match) {
                 var iter = std.mem.splitScalar(u8, line, ',');
                 const value = iter.first();
                 const path = iter.next() orelse continue; // Skip malformed lines
@@ -126,12 +146,12 @@ pub const Bookmark = struct {
     }
 };
 
-test "storeBookmark" {
+test "print" {
     var bookmark = Bookmark.init("gh", "https://www.github.com");
     bookmark.tags = &.{ "dev", "code", "test123" };
     var buffer: [1024]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
-    try bookmark.storeBookmark(&writer);
+    try bookmark.print(&writer);
 
     try writer.flush();
     try testing.expectEqualStrings("gh,https://www.github.com,dev,code,test123,\n", writer.buffered());
@@ -142,10 +162,10 @@ test "storeMultipleBookmarks" {
     bookmark.tags = &.{ "dev", "code", "test123" };
     var buffer: [1024]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
-    try bookmark.storeBookmark(&writer);
+    try bookmark.print(&writer);
 
     var bookmark2 = Bookmark.init("x", "https://www.x.com");
-    try bookmark2.storeBookmark(&writer);
+    try bookmark2.print(&writer);
 
     try testing.expectEqualStrings("gh,https://www.github.com,dev,code,test123,\nx,https://www.x.com,\n", writer.buffered());
 }
@@ -171,7 +191,7 @@ test "searchBookmarks" {
         \\
     ;
     var reader = std.Io.Reader.fixed(data);
-    const results = try Bookmark.search(testing.allocator, &reader, "dev");
+    const results = try Bookmark.search(testing.allocator, &reader, .{ .query = "dev" });
     defer {
         for (results) |bookmark| {
             testing.allocator.free(bookmark.tags);
@@ -191,7 +211,7 @@ test "searchBookmarksAll" {
         \\
     ;
     var reader = std.Io.Reader.fixed(data);
-    const results = try Bookmark.search(testing.allocator, &reader, "");
+    const results = try Bookmark.search(testing.allocator, &reader, .{ .query = "" });
     defer {
         for (results) |bookmark| {
             testing.allocator.free(bookmark.tags);
@@ -223,7 +243,7 @@ test "delete" {
     const results = try Bookmark.search(
         testing.allocator,
         &result_reader,
-        "",
+        .{ .query = "" },
     );
     defer {
         for (results) |bookmark| {
@@ -241,7 +261,7 @@ test "searchBookmarksEmpty" {
     // Test with empty file
     const data = "";
     var reader = std.Io.Reader.fixed(data);
-    const results = try Bookmark.search(testing.allocator, &reader, "");
+    const results = try Bookmark.search(testing.allocator, &reader, .{ .query = "" });
     defer testing.allocator.free(results);
 
     try testing.expectEqual(@as(usize, 0), results.len);
@@ -251,7 +271,7 @@ test "searchBookmarksNoTrailingNewline" {
     // Test with file that doesn't have a trailing newline
     const data = "gh,https://www.github.com,dev,code,";
     var reader = std.Io.Reader.fixed(data);
-    const results = try Bookmark.search(testing.allocator, &reader, "");
+    const results = try Bookmark.search(testing.allocator, &reader, .{ .query = "" });
     defer {
         for (results) |bookmark| {
             testing.allocator.free(bookmark.tags);
@@ -282,7 +302,7 @@ test "deleteBookmark" {
     const results = try Bookmark.search(
         testing.allocator,
         &result_reader,
-        "",
+        .{ .query = "" },
     );
     defer {
         for (results) |bm| {
