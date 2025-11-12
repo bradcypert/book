@@ -1,6 +1,12 @@
 const std = @import("std");
 const testing = std.testing;
 
+pub const ImportResponse = struct {
+    successful_count: usize,
+    failed_count: usize,
+    bookmarks: []const Bookmark,
+};
+
 pub const Bookmark = struct {
     value: []const u8,
     path: []const u8,
@@ -125,6 +131,60 @@ pub const Bookmark = struct {
         }
 
         return results.toOwnedSlice(allocator);
+    }
+
+    pub fn from_csv(allocator: std.mem.Allocator, reader: *std.Io.Reader) !ImportResponse {
+        var results: std.ArrayList(Bookmark) = .empty;
+        var successful_count: usize = 0;
+        var failed_count: usize = 0;
+        errdefer {
+            for (results.items) |bookmark| {
+                allocator.free(bookmark.tags);
+            }
+            results.deinit(allocator);
+        }
+        while (reader.takeDelimiterInclusive('\n')) |line| {
+            const bookmark = Bookmark.from_line(allocator, line) catch |err| switch (err) {
+                error.InvalidFormat => {
+                    failed_count += 1;
+                    continue;
+                },
+                else => {
+                    failed_count += 1;
+                    continue;
+                },
+            };
+            successful_count += 1;
+            try results.append(allocator, bookmark);
+        } else |err| switch (err) {
+            error.EndOfStream, error.StreamTooLong => {},
+            else => |e| return e,
+        }
+
+        const bookmarks = try results.toOwnedSlice(allocator);
+        return .{ .bookmarks = bookmarks, .successful_count = successful_count, .failed_count = failed_count };
+    }
+
+    pub fn from_line(allocator: std.mem.Allocator, line: []const u8) !Bookmark {
+        var iter = std.mem.splitScalar(u8, line, ',');
+        // if the line does not contain atleast one comma then it is invalid
+        const first = iter.first();
+        const path = iter.next() orelse return error.InvalidFormat;
+
+        // Collect remaining fields as tags
+        var tags: std.ArrayList([]const u8) = .empty;
+        defer tags.deinit(allocator);
+        while (iter.next()) |tag| {
+            if (tag.len > 0 and !std.mem.eql(u8, tag, "\n")) { // Skip empty strings and newlines
+                try tags.append(allocator, tag);
+            }
+        }
+
+        return .{
+            .value = first,
+            .path = path,
+            .tags = try tags.toOwnedSlice(allocator),
+        };
     }
 
     /// Delete a bookmark by name. Reads all bookmarks from reader, filters out the one
@@ -314,4 +374,53 @@ test "deleteBookmark" {
     try testing.expectEqual(@as(usize, 2), results.len);
     try testing.expectEqualStrings("gh", results[0].value);
     try testing.expectEqualStrings("hn", results[1].value);
+}
+
+test "from_csv test malformed data" {
+    const data =
+        \\gh
+        \\
+    ;
+    var reader = std.Io.Reader.fixed(data);
+    const results = try Bookmark.from_csv(testing.allocator, &reader);
+    defer testing.allocator.free(results.bookmarks);
+    try testing.expectEqual(1, results.failed_count);
+}
+
+test "from_csv" {
+    const data =
+        \\gh,https://www.github.com,dev,code,
+        \\gl,https://gitlab.com,dev,ci,vcs,
+        \\
+    ;
+    var reader = std.Io.Reader.fixed(data);
+    const results = try Bookmark.from_csv(testing.allocator, &reader);
+    defer {
+        for (results.bookmarks) |bookmark| {
+            testing.allocator.free(bookmark.tags);
+        }
+        testing.allocator.free(results.bookmarks);
+    }
+    try testing.expectEqual(@as(usize, 2), results.bookmarks.len);
+    try testing.expectEqualStrings("gh", results.bookmarks[0].value);
+    try testing.expectEqualStrings("gl", results.bookmarks[1].value);
+    try testing.expectEqual(2, results.bookmarks[0].tags.len);
+    try testing.expectEqual(3, results.bookmarks[1].tags.len);
+    try testing.expectEqualStrings("vcs", results.bookmarks[1].tags[2]);
+}
+
+test "from_line invalid format" {
+    const line = "gh";
+    try testing.expectError(error.InvalidFormat, Bookmark.from_line(testing.allocator, line));
+}
+
+test "from_line" {
+    const line = "gh,https://www.github.com,dev,code,test123,\n";
+    const bookmark = try Bookmark.from_line(testing.allocator, line);
+    defer testing.allocator.free(bookmark.tags);
+    try testing.expectEqualStrings("gh", bookmark.value);
+    try testing.expectEqualStrings("https://www.github.com", bookmark.path);
+    try testing.expectEqualStrings("dev", bookmark.tags[0]);
+    try testing.expectEqualStrings("code", bookmark.tags[1]);
+    try testing.expectEqualStrings("test123", bookmark.tags[2]);
 }

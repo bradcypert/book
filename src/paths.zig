@@ -13,6 +13,49 @@ fn getStoragePath(allocator: std.mem.Allocator) ![]const u8 {
     return std.fs.getAppDataDir(allocator, "bradcypert.book");
 }
 
+pub fn getFileByPath(allocator: std.mem.Allocator, path: []const u8, mode: FileMode, create: bool) !std.fs.File {
+    const file_exists = blk: {
+        std.fs.cwd().access(path, .{}) catch |err| switch (err) {
+            error.FileNotFound => break :blk false,
+            else => return err,
+        };
+        break :blk true;
+    };
+    if (!file_exists and !create) {
+        return error.FileNotFound;
+    } else if (file_exists and create) {
+        const storage_path = try getStoragePath(allocator);
+        defer allocator.free(storage_path);
+
+        // Create storage directory if it doesn't exist
+        std.fs.cwd().makePath(storage_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {}, // This is fine
+            else => return err,
+        };
+
+        if (!file_exists) {
+            const file = try std.fs.cwd().createFile(path, .{ .read = true });
+            return file;
+        }
+    }
+
+    return switch (mode) {
+        .read_only => try std.fs.cwd().openFile(path, .{ .mode = .read_only }),
+        .write_only => try std.fs.cwd().openFile(path, .{ .mode = .write_only }),
+        .read_write => try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+        .append => blk: {
+            const file = try std.fs.cwd().openFile(path, .{ .mode = .write_only });
+            try file.seekFromEnd(0);
+            break :blk file;
+        },
+        .append_read_write => blk: {
+            const file = try std.fs.cwd().openFile(path, .{ .mode = .read_write });
+            try file.seekFromEnd(0);
+            break :blk file;
+        },
+    };
+}
+
 pub fn getBookmarkFilePath(allocator: std.mem.Allocator) ![]const u8 {
     const storage_path = try getStoragePath(allocator);
     defer allocator.free(storage_path);
@@ -70,6 +113,40 @@ pub fn getBookmarkFile(allocator: std.mem.Allocator, mode: FileMode) !std.fs.Fil
             break :blk file;
         },
     };
+}
+
+test "getFileByPath" {
+    const testing = std.testing;
+
+    const test_file_path = try getBookmarkFilePath(testing.allocator);
+    defer testing.allocator.free(test_file_path);
+
+    // Clean up any existing test file
+    std.fs.cwd().deleteFile(test_file_path) catch {};
+    // Create the file
+    const file = try getBookmarkFile(testing.allocator, .read_write);
+    defer file.close();
+
+    // Create the file
+    const accessed_file_by_path = try getFileByPath(testing.allocator, test_file_path, .read_only, true);
+    defer accessed_file_by_path.close();
+
+    // Verify file exists and is accessible
+    const file_stat = try accessed_file_by_path.stat();
+    try testing.expect(file_stat.size >= 0);
+
+    // Clean up
+    std.fs.cwd().deleteFile(test_file_path) catch {};
+}
+
+test "getFileByPath test file not existing" {
+    const testing = std.testing;
+    // Create the file
+    const file = try getBookmarkFile(testing.allocator, .read_write);
+    defer file.close();
+
+    // Create the file
+    try testing.expectError(error.FileNotFound, getFileByPath(testing.allocator, "jiberrish.filetype", .read_only, true));
 }
 
 test "getBookmarkFilePath" {

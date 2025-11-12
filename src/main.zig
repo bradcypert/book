@@ -13,6 +13,7 @@ const InputAction = enum {
     Store,
     Open,
     Search,
+    Import,
     Delete,
     DeleteAll,
     List,
@@ -33,6 +34,7 @@ const Input = union(InputAction) {
         query: []const u8,
         tags: []const []const u8 = &.{},
     },
+    Import: struct { path: ?[]const u8 },
     Delete: struct {
         bookmark: []const u8,
     },
@@ -113,6 +115,12 @@ const CLI = struct {
             .Search => |s| {
                 self.handleSearch(allocator, s) catch |err| {
                     try self.stderr.print("Error searching bookmarks: {any}\n", .{err});
+                    try self.stderr.flush();
+                };
+            },
+            .Import => |i| {
+                self.handleImport(allocator, i) catch |err| {
+                    try self.stderr.print("Error importing bookmarks: {any}\n", .{err});
                     try self.stderr.flush();
                 };
             },
@@ -281,6 +289,50 @@ const CLI = struct {
         try self.printTable(allocator, results);
     }
 
+    fn handleImport(self: @This(), allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Import)) !void {
+        var bookmarkFile = try paths.getBookmarkFile(allocator, .append);
+        defer bookmarkFile.close();
+        var bookmarkFileBuffer: [1024]u8 = undefined;
+        var writer = bookmarkFile.writer(&bookmarkFileBuffer);
+        var bookmarks: std.ArrayList(Bookmark) = .empty;
+        defer bookmarks.deinit(allocator);
+        var successful_count: usize = 0;
+        var failed_count: usize = 0;
+        defer {
+            for (bookmarks.items) |bookmark| {
+                allocator.free(bookmark.tags);
+            }
+        }
+
+        if (input.path) |path| {
+            // handle importing from file
+            var file = try paths.getFileByPath(allocator, path, .read_only, false);
+            defer file.close();
+            var buffer: [1024]u8 = undefined;
+            var reader = file.reader(&buffer);
+            const parsedBookmarks = try Bookmark.from_csv(allocator, &reader.interface);
+            defer allocator.free(parsedBookmarks.bookmarks);
+            try bookmarks.appendSlice(allocator, parsedBookmarks.bookmarks);
+            successful_count = parsedBookmarks.successful_count;
+            failed_count = parsedBookmarks.failed_count;
+        } else {
+            // handle piping from stdin
+            const parsedBookmarks = try Bookmark.from_csv(allocator, self.stdin);
+            defer allocator.free(parsedBookmarks.bookmarks);
+            try bookmarks.appendSlice(allocator, parsedBookmarks.bookmarks);
+            successful_count = parsedBookmarks.successful_count;
+            failed_count = parsedBookmarks.failed_count;
+        }
+
+        for (bookmarks.items) |bookmark| {
+            try bookmark.print(&writer.interface);
+            try writer.interface.flush();
+        }
+
+        try self.stdout.print("Imported {d} bookmark(s).\n{d} failed imports.\n", .{ successful_count, failed_count });
+        try self.stdout.flush();
+    }
+
     fn handleOpen(_: @This(), allocator: std.mem.Allocator, input: @TypeOf(@as(Input, undefined).Open)) !void {
         const file = try paths.getBookmarkFile(allocator, .read_only);
         defer file.close();
@@ -376,11 +428,13 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
 
     var is_search = false;
     var is_delete_all = false;
+    var is_import = false;
     var is_delete = false;
     var is_list = false;
     var i_am_sure = false;
     var is_export = false;
     var output_path: ?[]const u8 = null;
+    var import_path: ?[]const u8 = null;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-tags") or std.mem.eql(u8, arg, "--tags")) {
@@ -392,7 +446,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
                 }
             }
         } else if (std.mem.eql(u8, arg, "-output") or std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
-            output_path = args.next() orelse return error.MissingOutputPath;
+            output_path = args.next() orelse return error.missingoutputpath;
+        } else if (std.mem.eql(u8, arg, "-import") or std.mem.eql(u8, arg, "--import")) {
+            import_path = args.next();
+            is_import = true;
         } else if (std.mem.eql(u8, arg, "-search") or std.mem.eql(u8, arg, "--search")) {
             is_search = true;
         } else if (std.mem.eql(u8, arg, "-deleteAll") or std.mem.eql(u8, arg, "--deleteAll")) {
@@ -410,13 +467,17 @@ fn parseArgs(allocator: std.mem.Allocator) !Input {
         }
     }
 
-    if (positional_args.items.len == 0 and !is_list and !is_delete_all and !is_export) {
+    if (positional_args.items.len == 0 and !is_list and !is_delete_all and !is_export and !is_import) {
         return Input{ .TUI = .{} };
     }
 
     // Return the appropriate tagged union variant based on flags
     if (is_delete_all) {
         return Input{ .DeleteAll = .{ .i_am_sure = i_am_sure } };
+    }
+
+    if (is_import) {
+        return Input{ .Import = .{ .path = import_path } };
     }
 
     if (is_list) {

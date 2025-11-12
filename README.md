@@ -24,6 +24,17 @@ book gh
 book --list
 ```
 
+
+## Importing bookmarks
+
+```bash
+# import bookmarks
+book --import file.csv
+
+cat file.csv | book --import
+```
+
+
 ## Searching for bookmarks
 
 ```bash
